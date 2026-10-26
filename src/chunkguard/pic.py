@@ -5,8 +5,8 @@ sentence is compared with that summary; the mean similarity is the threshold.
 Runs of neighbouring sentences on the same side of the threshold form a chunk,
 so boundaries sit exactly where the text turns towards or away from the topic.
 
-Splitting long and merging short chunks is not part of the paper; both can be
-switched off (max_chars=None, min_chars=0).
+Splitting long chunks (max_chars) and merging short ones (min_chars) are not
+part of the paper. Merging is off by default; max_chars=None switches splitting off.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ class _Chunker:
         self,
         *,
         max_chars: int | None = 2000,
-        min_chars: int = 200,
+        min_chars: int = 0,
         summary_max_chars: int | None = 100_000,
         summary_prompt: str = SUMMARY_PROMPT,
         sentence_splitter: SentenceSplitter = split_sentences,
@@ -146,7 +146,7 @@ class PICChunker(_Chunker):
         spans = self.sentence_splitter(text, language)
         if not spans:
             return []
-        summary = self.complete(self._prompt(text, language)).strip()
+        summary = (self.complete(self._prompt(text, language)) or "").strip()
         vectors = self.embed([summary, *(text[s:e] for s, e in spans)])
         return self._chunks(doc_id, text, spans, summary, vectors)
 
@@ -163,7 +163,7 @@ class AsyncPICChunker(_Chunker):
         spans = self.sentence_splitter(text, language)
         if not spans:
             return []
-        summary = (await self.complete(self._prompt(text, language))).strip()
+        summary = (await self.complete(self._prompt(text, language)) or "").strip()
         vectors = await self.embed([summary, *(text[s:e] for s, e in spans)])
         return self._chunks(doc_id, text, spans, summary, vectors)
 

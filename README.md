@@ -53,6 +53,9 @@ chunker = PICChunker(complete=complete, embed=lambda texts: encoder.encode(texts
 chunks = chunker.split(doc_id="report-7", text=cleaned_text, language="en")
 ```
 
+Options: `max_chars` (default 2000), `min_chars` (default 0, see below), `summary_max_chars`,
+`summary_prompt`, `sentence_splitter`.
+
 **Option 2: `.env` with LiteLLM.** Install the extra, copy [`.env.example`](.env.example) to
 `.env` and set the two models as [LiteLLM strings](https://docs.litellm.ai/docs/providers):
 
@@ -139,13 +142,14 @@ chunker = PICChunker(complete, embed, sentence_splitter=nltk_sentences)
 4. **Threshold.** The mean of those similarities. A sentence is relevant at or above it.
 5. **Grouping.** Each run of neighbouring sentences with the same flag becomes one chunk.
 
-Steps 1 to 5 are the method as published. chunkguard adds three things for production use;
-set `max_chars=None, min_chars=0, summary_max_chars=None` to switch them off:
+Steps 1 to 5 are the method as published. chunkguard adds three things for production use:
 
-6. **Long chunks** (over `max_chars`) are split at sentence boundaries into near-equal pieces.
-7. **Short chunks** (under `min_chars`) merge into the neighbour with the closest mean
-   similarity, unless that would exceed `max_chars`. A merged chunk is `relevant` when its
-   relevant sentences make up at least half of its text.
+6. **Long chunks** (over `max_chars`, default 2000) are split at sentence boundaries into
+   near-equal pieces. `max_chars=None` switches this off.
+7. **Short chunks** merge into the neighbour with the closest mean similarity when you set
+   `min_chars` (off by default), unless that would exceed `max_chars`. A merged chunk is
+   `relevant` when its relevant sentences make up at least half of its text. Note that with
+   merging, a short document can end up as a single chunk.
 8. **Long documents** reach the summarizer as eight evenly spread excerpts totalling
    `summary_max_chars`, so the call fits the context window and every part of the document
    still shapes the summary.
@@ -167,7 +171,7 @@ from environment variables or `.env`, prefixed `CHUNKGUARD_`:
 | `REQUEST_TIMEOUT` | `120` | Seconds per request |
 | `MAX_RETRIES` | `2` | Retries per request on provider errors |
 | `MAX_CHUNK_CHARS` | `2000` | Split longer chunks; `0` = no limit |
-| `MIN_CHUNK_CHARS` | `200` | Merge shorter chunks; `0` = no merging |
+| `MIN_CHUNK_CHARS` | `0` | Merge shorter chunks into a neighbour; `0` = off |
 | `SUMMARY_MAX_CHARS` | `100000` | Excerpt longer documents for the summary; `0` = send all |
 
 Embedding requests stay below 400,000 characters each. A sentence longer than 8,000

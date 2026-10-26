@@ -11,6 +11,7 @@ from typing import Any
 
 try:
     import litellm
+    from pydantic import ValidationError
     from pydantic_settings import BaseSettings, SettingsConfigDict
 except ImportError as error:
     raise ImportError(
@@ -49,7 +50,7 @@ class Settings(BaseSettings):
     max_retries: int = 2
 
     max_chunk_chars: int = 2000  # 0 = no limit
-    min_chunk_chars: int = 200  # 0 = no merging
+    min_chunk_chars: int = 0  # e.g. 200 merges shorter chunks into a neighbour
     summary_max_chars: int = 100_000  # 0 = send the whole document
 
 
@@ -126,7 +127,13 @@ def async_litellm_embed(
 
 
 def _parts(env_file: str) -> tuple[Settings, dict, dict, dict]:
-    s = Settings(_env_file=env_file)
+    try:
+        s = Settings(_env_file=env_file)
+    except ValidationError as error:
+        missing = ", ".join(f"CHUNKGUARD_{e['loc'][0].upper()}" for e in error.errors())
+        raise ValueError(
+            f"missing settings: {missing}; set them in {env_file} or the environment"
+        ) from error
     llm = _connection(s.llm_api_key, s.llm_api_base, s.llm_api_version, s)
     embedder = _connection(s.embedding_api_key, s.embedding_api_base, s.embedding_api_version, s)
     options = {

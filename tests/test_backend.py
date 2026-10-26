@@ -119,8 +119,8 @@ def test_zero_switches_limits_off_and_empty_counts_as_unset(env_file):
         assert (chunker.max_chars, chunker.min_chars, chunker.summary_max_chars) == (None, 0, None)
 
 
-def test_missing_model_fails(env_file):
-    with pytest.raises(ValueError):
+def test_missing_model_names_the_variables(env_file):
+    with pytest.raises(ValueError, match=r"CHUNKGUARD_EMBEDDING_MODEL.*set them in"):
         chunker_from_env(env_file("CHUNKGUARD_LLM_MODEL=m\n"))
 
 

@@ -165,10 +165,22 @@ def test_long_document_summary_sees_evenly_spread_excerpt():
     assert _excerpt("kurz", 8_000) == "kurz"
 
 
-def test_empty_summary_is_an_error():
-    chunker = PICChunker(lambda prompt: "  ", bag_of_words)
+@pytest.mark.parametrize("answer", ["  ", None])
+def test_empty_summary_is_an_error(answer):
+    chunker = PICChunker(lambda prompt: answer, bag_of_words)
     with pytest.raises(ValueError, match="empty summary"):
         chunker.split("d1", DOCUMENT, "de")
+
+
+def test_defaults_follow_the_paper_except_a_length_cap():
+    chunker, _ = make()
+    chunker = PICChunker(chunker.complete, chunker.embed)
+    assert (chunker.max_chars, chunker.min_chars) == (2000, 0)
+    assert [c.sentence_end - c.sentence_start for c in chunker.split("d1", DOCUMENT, "de")] == [
+        2,
+        2,
+        1,
+    ]
 
 
 def test_wrong_number_of_embeddings_is_an_error():
