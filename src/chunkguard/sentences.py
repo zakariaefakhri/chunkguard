@@ -6,7 +6,11 @@ the rest. On top of that, every line break ends a sentence, so headings and
 list items stand alone.
 """
 
+import re
+
 import sentencex
+
+_SHORT_NUMBER = re.compile(r"(?:^|(?<=\s))\d{1,3}\.$")
 
 
 def split_sentences(text: str, language: str) -> list[tuple[int, int]]:
@@ -19,8 +23,9 @@ def split_sentences(text: str, language: str) -> list[tuple[int, int]]:
     primary = language.split("-")[0].lower()
     cuts = {i + 1 for i, char in enumerate(text) if char == "\n"}
     for boundary in sentencex.get_sentence_boundaries(primary, text):
-        if not _continues_lowercase(text, boundary["end_index"]):
-            cuts.add(boundary["end_index"])
+        end = boundary["end_index"]
+        if not _continues_lowercase(text, end) and not _ends_with_short_number(text, end):
+            cuts.add(end)
 
     spans: list[tuple[int, int]] = []
     start = 0
@@ -42,3 +47,13 @@ def _continues_lowercase(text: str, position: int) -> bool:
     """
     rest = text[position:].lstrip(" \t")
     return bool(rest) and rest[0].islower()
+
+
+def _ends_with_short_number(text: str, position: int) -> bool:
+    """True if the piece ends in a number of up to three digits plus a period.
+
+    That is an ordinal in German, Hungarian, Danish, Czech and others ("im 18.
+    Jahrhundert"); sentencex only knows the case before month names. The cost
+    is a merged sentence in the rare English "We sold 3. Then ..." case.
+    """
+    return _SHORT_NUMBER.search(text[:position].rstrip()) is not None

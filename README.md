@@ -164,6 +164,8 @@ from environment variables or `.env`, prefixed `CHUNKGUARD_`:
 | `LLM_API_VERSION` | – | Azure only |
 | `EMBEDDING_MODEL`, `EMBEDDING_API_*` | | Same settings for the embedding model |
 | `EMBEDDING_BATCH_SIZE` | `64` | Texts per embedding request |
+| `REQUEST_TIMEOUT` | `120` | Seconds per request |
+| `MAX_RETRIES` | `2` | Retries per request on provider errors |
 | `MAX_CHUNK_CHARS` | `2000` | Split longer chunks; `0` = no limit |
 | `MIN_CHUNK_CHARS` | `200` | Merge shorter chunks; `0` = no merging |
 | `SUMMARY_MAX_CHARS` | `100000` | Excerpt longer documents for the summary; `0` = send all |
@@ -177,9 +179,11 @@ LiteLLM versions 1.82.7 and 1.82.8 were compromised on PyPI in March 2026; the e
 ## Limits
 
 - **Sentence splitting is rule-based.** sentencex carries punctuation and abbreviation rules
-  for many languages and falls back to related ones, and chunkguard never cuts before a
-  lowercase letter. It still misses some boundaries (a sentence ending in "etc.") and does not
-  split languages without sentence punctuation (Thai). Pass your own splitter if that matters.
+  for many languages and falls back to related ones. chunkguard adds two language-neutral
+  rules: no cut before a lowercase letter, and no cut after a number of up to three digits
+  ("im 18. Jahrhundert"), which merges the rare English "We sold 3. Then ..." into one
+  sentence. Some boundaries are still missed (a sentence ending in "etc."), and languages
+  without sentence punctuation (Thai) are not split. Pass your own splitter if that matters.
 - **Sizes are in characters, not tokens.** Pick `MAX_CHUNK_CHARS` with your embedding model's
   token limit in mind.
 - **The relevance flag is relative to the document.** Nearly every document has relevant and

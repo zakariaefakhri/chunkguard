@@ -24,7 +24,20 @@ def test_abbreviations_follow_the_language():
         "Ez jó.",
     ]
     assert sentences("El Sr. García llegó. Se fue.", "es") == ["El Sr. García llegó.", "Se fue."]
-    assert len(sentences("We sold 3. Then we stopped.", "en")) == 2
+
+
+def test_short_numbers_before_a_period_are_ordinals():
+    assert sentences("Ein Zimmer aus dem 18. Jahrhundert. Wir wohnen im 3. Stock. Laut.") == [
+        "Ein Zimmer aus dem 18. Jahrhundert.",
+        "Wir wohnen im 3. Stock.",
+        "Laut.",
+    ]
+    assert sentences("Den 3. Maj kom han. Ja.", "da") == ["Den 3. Maj kom han.", "Ja."]
+    # Four digits are years, not ordinals.
+    assert sentences("Gegründet 1998. Seitdem gewachsen.") == [
+        "Gegründet 1998.",
+        "Seitdem gewachsen.",
+    ]
 
 
 def test_lowercase_continuation_is_never_a_boundary():

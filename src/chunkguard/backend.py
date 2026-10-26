@@ -44,14 +44,23 @@ class Settings(BaseSettings):
     embedding_api_version: str | None = None
     embedding_batch_size: int = DEFAULT_EMBED_BATCH_SIZE
 
+    # Per request. LiteLLM's own defaults are 600 s and no retries.
+    request_timeout: float = 120
+    max_retries: int = 2
+
     max_chunk_chars: int = 2000  # 0 = no limit
     min_chunk_chars: int = 200  # 0 = no merging
     summary_max_chars: int = 100_000  # 0 = send the whole document
 
 
-def _connection(api_key: str | None, api_base: str | None, api_version: str | None) -> dict:
+def _connection(
+    api_key: str | None, api_base: str | None, api_version: str | None, s: Settings
+) -> dict:
     options = {"api_key": api_key, "api_base": api_base, "api_version": api_version}
-    return {key: value for key, value in options.items() if value is not None}
+    return {key: value for key, value in options.items() if value is not None} | {
+        "timeout": s.request_timeout,
+        "num_retries": s.max_retries,
+    }
 
 
 def _batches(texts: list[str], size: int) -> list[list[str]]:
@@ -118,8 +127,8 @@ def async_litellm_embed(
 
 def _parts(env_file: str) -> tuple[Settings, dict, dict, dict]:
     s = Settings(_env_file=env_file)
-    llm = _connection(s.llm_api_key, s.llm_api_base, s.llm_api_version)
-    embedder = _connection(s.embedding_api_key, s.embedding_api_base, s.embedding_api_version)
+    llm = _connection(s.llm_api_key, s.llm_api_base, s.llm_api_version, s)
+    embedder = _connection(s.embedding_api_key, s.embedding_api_base, s.embedding_api_version, s)
     options = {
         "max_chars": s.max_chunk_chars or None,
         "min_chars": s.min_chunk_chars,

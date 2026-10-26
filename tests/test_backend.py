@@ -83,10 +83,12 @@ def test_from_env_passes_models_and_connection(env_file, recorder):
         "2024-10-21",
     )
     assert DOCUMENT in llm["messages"][0]["content"]
+    assert (llm["timeout"], llm["num_retries"]) == (120, 2)
     # Unset settings are not passed, so LiteLLM falls back to provider variables.
     assert embedding["model"] == "ollama/bge-m3"
     assert embedding["api_base"] == "http://localhost:11434"
     assert "api_key" not in embedding and "api_version" not in embedding
+    assert (embedding["timeout"], embedding["num_retries"]) == (120, 2)
     assert [c.relevant for c in chunks] == [True, False, True]
 
 
@@ -105,9 +107,14 @@ def test_zero_switches_limits_off_and_empty_counts_as_unset(env_file):
         "CHUNKGUARD_LLM_MODEL=m\nCHUNKGUARD_EMBEDDING_MODEL=e\nCHUNKGUARD_LLM_API_BASE=\n"
         "CHUNKGUARD_MAX_CHUNK_CHARS=0\nCHUNKGUARD_MIN_CHUNK_CHARS=0\n"
         "CHUNKGUARD_SUMMARY_MAX_CHARS=0\nCHUNKGUARD_EMBEDDING_BATCH_SIZE=\n"
+        "CHUNKGUARD_REQUEST_TIMEOUT=30\nCHUNKGUARD_MAX_RETRIES=0\n"
     )
     assert Settings(_env_file=path).llm_api_base is None
     assert Settings(_env_file=path).embedding_batch_size == 64
+    assert (Settings(_env_file=path).request_timeout, Settings(_env_file=path).max_retries) == (
+        30,
+        0,
+    )
     for chunker in (chunker_from_env(path), async_chunker_from_env(path)):
         assert (chunker.max_chars, chunker.min_chars, chunker.summary_max_chars) == (None, 0, None)
 
