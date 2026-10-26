@@ -21,7 +21,7 @@ one embedding pass over its sentences. No training.
 ## Install
 
 ```bash
-pip install chunkguard              # core: bring your own model functions, depends only on Pydantic
+pip install chunkguard              # core: bring your own model functions (Pydantic + sentencex)
 pip install "chunkguard[litellm]"   # plus .env configuration for 100+ providers via LiteLLM
 ```
 
@@ -110,7 +110,8 @@ to change it.
 
 ### Your own sentence splitter
 
-The built-in splitter is rule-based (see [Limits](#limits)). To use another, pass a function
+Sentences come from [sentencex](https://github.com/wikimedia/sentencex) (see [Limits](#limits)).
+To use another splitter, pass a function
 that returns `(start, end)` character spans. For example, NLTK's Punkt, which the paper uses
 for sentence splitting:
 
@@ -129,7 +130,8 @@ chunker = PICChunker(complete, embed, sentence_splitter=nltk_sentences)
 
 ## How it works
 
-1. **Sentences.** Split into sentences, keeping character offsets.
+1. **Sentences.** Split into sentences with sentencex, keeping character offsets. Every line
+   break also ends a sentence, so headings and list items stand alone.
 2. **Summary.** One LLM call with the summarizer prompt from the paper (Appendix C), plus an
    instruction to answer in the document's language.
 3. **Similarity.** Embed the summary and every sentence; cosine similarity of each sentence
@@ -174,11 +176,10 @@ LiteLLM versions 1.82.7 and 1.82.8 were compromised on PyPI in March 2026; the e
 
 ## Limits
 
-- **Sentence splitting is rule-based.** It knows abbreviations for German, English, Italian
-  and Hungarian, handles full-width punctuation (Chinese, Japanese), `؟` and `।`, and treats
-  every line break as a sentence end. It misses some boundaries, such as a sentence ending
-  in "etc.", and does not split languages without sentence punctuation (Thai). Pass your own
-  splitter if that matters.
+- **Sentence splitting is rule-based.** sentencex carries punctuation and abbreviation rules
+  for many languages and falls back to related ones, and chunkguard never cuts before a
+  lowercase letter. It still misses some boundaries (a sentence ending in "etc.") and does not
+  split languages without sentence punctuation (Thai). Pass your own splitter if that matters.
 - **Sizes are in characters, not tokens.** Pick `MAX_CHUNK_CHARS` with your embedding model's
   token limit in mind.
 - **The relevance flag is relative to the document.** Nearly every document has relevant and

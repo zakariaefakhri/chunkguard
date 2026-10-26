@@ -1,45 +1,26 @@
-"""Rule-based sentence splitter that returns character spans, so no text is lost."""
+"""Sentence splitting that returns character spans, so no text is lost.
 
-import re
+Boundaries come from sentencex (Wikimedia), which carries abbreviation and
+punctuation rules for many languages and falls back to related languages for
+the rest. On top of that, every line break ends a sentence, so headings and
+list items stand alone.
+"""
 
-# Lowercase tokens that end with a period without ending a sentence.
-# Single letters ("z. B.", "J. R. R.", "e.g.") are handled generically.
-_ABBREVIATIONS = {
-    "de": set(
-        "abs art bspw bzw ca dr evtl ff fr gem ggf hr inkl jh lt max min mind mio mrd nr prof "
-        "st str tel tsd usw vgl zzgl".split()
-    ),
-    "en": set("approx cf dr etc fig inc jr ltd mr mrs ms no prof sr st vs".split()),
-    "it": set("arch art avv dott ecc es ing pag prof sig sigg tel".split()),
-    "hu": set("bt dr ill kb kft nyrt pl stb zrt".split()),
-}
-
-# Languages that write ordinals as "3. Oktober" / "2. emelet".
-_ORDINAL_LANGUAGES = {"de", "hu"}
-
-# word before the terminator, terminator plus closing quotes, first char after the gap
-_SENTENCE_END = re.compile(
-    r"(?P<word>[^\s.!?…؟।]*)(?P<end>[.!?…؟।]+[\"'»«“”’)\]]*)(?=\s+(?P<next>\S)|\s*$)"
-)
-# Chinese/Japanese full-width terminators end a sentence without a following space.
-_FULL_WIDTH_END = re.compile(r"[。！？]+[」』”’）)]*")
+import sentencex
 
 
 def split_sentences(text: str, language: str) -> list[tuple[int, int]]:
     """Return the (start, end) character spans of the sentences in ``text``.
 
-    Line breaks always end a sentence, so headings and list items stand alone.
-    Spans exclude surrounding whitespace; ``text[start:end]`` is the sentence.
+    ``language`` is a BCP 47 code such as "en" or "pt-BR"; only the primary
+    subtag is used. Spans exclude surrounding whitespace, so ``text[start:end]``
+    is the sentence, and whitespace-only pieces are dropped.
     """
-    lang = language.split("-")[0].lower()
-    abbreviations = _ABBREVIATIONS.get(lang, set())
-    ordinals = lang in _ORDINAL_LANGUAGES
-
-    cuts = {i for i, char in enumerate(text) if char == "\n"}
-    cuts.update(match.end() for match in _FULL_WIDTH_END.finditer(text))
-    for match in _SENTENCE_END.finditer(text):
-        if _is_boundary(match, abbreviations, ordinals):
-            cuts.add(match.end())
+    primary = language.split("-")[0].lower()
+    cuts = {i + 1 for i, char in enumerate(text) if char == "\n"}
+    for boundary in sentencex.get_sentence_boundaries(primary, text):
+        if not _continues_lowercase(text, boundary["end_index"]):
+            cuts.add(boundary["end_index"])
 
     spans: list[tuple[int, int]] = []
     start = 0
@@ -53,17 +34,11 @@ def split_sentences(text: str, language: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _is_boundary(match: re.Match[str], abbreviations: set[str], ordinals: bool) -> bool:
-    following = match.group("next")
-    if following is None or following.islower():
-        return False
-    if any(char in "!?…؟।" for char in match.group("end")):
-        return True
-    word = match.group("word").lstrip("([\"'»«„“")
-    if len(word) == 1 and word.isalpha():
-        return False
-    if word.lower() in abbreviations:
-        return False
-    if ordinals and word.isdigit() and len(word) <= 3:
-        return False
-    return True
+def _continues_lowercase(text: str, position: int) -> bool:
+    """True if the same line goes on with a lowercase letter, i.e. after an abbreviation.
+
+    sentencex misses this for some abbreviations and for non-ASCII letters such
+    as "ü". Merging two sentences costs less than cutting one in half.
+    """
+    rest = text[position:].lstrip(" \t")
+    return bool(rest) and rest[0].islower()

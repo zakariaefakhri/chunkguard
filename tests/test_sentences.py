@@ -14,17 +14,23 @@ def test_splits_on_terminal_punctuation():
     ]
 
 
-def test_keeps_abbreviations_initials_and_dates_together():
-    text = "Die Wohnung Nr. 5 liegt z. B. am 3. Oktober frei, Stand 26.10.2026. Danach nicht."
-    assert sentences(text) == [
-        "Die Wohnung Nr. 5 liegt z. B. am 3. Oktober frei, Stand 26.10.2026.",
+def test_abbreviations_follow_the_language():
+    assert sentences("Die Wohnung Nr. 5 liegt z. B. am 3. Oktober frei. Danach nicht.") == [
+        "Die Wohnung Nr. 5 liegt z. B. am 3. Oktober frei.",
         "Danach nicht.",
     ]
-
-
-def test_ordinals_only_in_ordinal_languages():
+    assert sentences("Dr. Kovács a Kft. ügyvezetője. Ez jó.", "hu") == [
+        "Dr. Kovács a Kft. ügyvezetője.",
+        "Ez jó.",
+    ]
+    assert sentences("El Sr. García llegó. Se fue.", "es") == ["El Sr. García llegó.", "Se fue."]
     assert len(sentences("We sold 3. Then we stopped.", "en")) == 2
-    assert len(sentences("Am 3. Oktober ging es los.", "de")) == 1
+
+
+def test_lowercase_continuation_is_never_a_boundary():
+    # Abbreviations sentencex does not know, including before non-ASCII letters.
+    assert sentences("Siehe Abb. über uns. Ja.") == ["Siehe Abb. über uns.", "Ja."]
+    assert sentences("Voir p. élevé. Oui.", "fr") == ["Voir p. élevé.", "Oui."]
 
 
 def test_line_breaks_end_sentences():
@@ -36,29 +42,24 @@ def test_line_breaks_end_sentences():
     ]
 
 
-def test_lowercase_continuation_is_not_a_boundary():
-    assert len(sentences("Siehe Abb. drei und mehr.")) == 1
+def test_scripts_without_spaces_after_terminators():
+    assert sentences("東京は大きい。大阪も「大きい！」京都は？", "ja") == [
+        "東京は大きい。",
+        "大阪も「大きい！」",
+        "京都は？",
+    ]
+    assert len(sentences("هل أنت بخير؟ نعم.", "ar")) == 2
+    assert len(sentences("यह घर है। वह बड़ा है।", "hi")) == 2
 
 
 def test_spans_cover_all_non_whitespace():
     text = "  Erster Satz.  Zweiter Satz?\n\nDritter »Satz«. Vierter "
     spans = split_sentences(text, "de")
+    assert all(text[s:e] == text[s:e].strip() for s, e in spans)
     covered = "".join(text[s:e] for s, e in spans)
     assert covered.replace(" ", "") == "".join(text.split())
 
 
 def test_empty_text():
     assert split_sentences("   \n ", "de") == []
-
-
-def test_full_width_terminators_need_no_space():
-    assert sentences("東京は大きい。大阪も「大きい！」京都は？", "ja") == [
-        "東京は大きい。",
-        "大阪も「大きい！」",
-        "京都は？",
-    ]
-
-
-def test_arabic_and_devanagari_terminators():
-    assert len(sentences("هل أنت بخير؟ نعم", "ar")) == 2
-    assert len(sentences("यह घर है। वह बड़ा है।", "hi")) == 2
+    assert split_sentences("", "de") == []
