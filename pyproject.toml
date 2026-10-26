@@ -24,7 +24,8 @@ dependencies = ["pydantic>=2.0", "sentencex>=1.0.30"]
 
 [project.optional-dependencies]
 # .env configuration for any provider. 1.82.7/1.82.8 were compromised on PyPI.
-litellm = ["litellm>=1.83.0", "pydantic-settings>=2.2"]
+# tenacity: LiteLLM needs it for num_retries but does not declare it.
+litellm = ["litellm>=1.83.0", "pydantic-settings>=2.2", "tenacity>=8"]
 # Token-based chunk limits.
 tokens = ["tiktoken>=0.8"]
 
@@ -34,7 +35,7 @@ Issues = "https://github.com/zakariaefakhri/chunkguard/issues"
 Paper = "https://aclanthology.org/2025.findings-acl.422/"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "litellm>=1.83.0", "pydantic-settings>=2.2", "tiktoken>=0.8"]
+dev = ["pytest>=8", "ruff>=0.6", "litellm>=1.83.0", "pydantic-settings>=2.2", "tenacity>=8", "tiktoken>=0.8"]
 
 [build-system]
 requires = ["hatchling>=1.27"]

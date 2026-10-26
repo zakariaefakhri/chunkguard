@@ -157,10 +157,21 @@ def test_core_works_without_the_litellm_extra():
 
 
 class OpenAICompatible(BaseHTTPRequestHandler):
-    """Minimal OpenAI-compatible server: one chat and one embeddings route."""
+    """Minimal OpenAI-compatible server: one chat and one embeddings route.
+
+    The first `failures` requests answer 503, like a provider under load.
+    """
+
+    failures = 0
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if OpenAICompatible.failures > 0:
+            OpenAICompatible.failures -= 1
+            self.send_response(503)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if self.path.endswith("/chat/completions"):
             payload = {
                 "id": "c1",
@@ -197,7 +208,9 @@ class OpenAICompatible(BaseHTTPRequestHandler):
         pass
 
 
-def test_real_litellm_against_openai_compatible_server(env_file):
+@pytest.mark.parametrize("failures", [0, 1])
+def test_real_litellm_against_openai_compatible_server(env_file, failures):
+    OpenAICompatible.failures = failures
     server = ThreadingHTTPServer(("127.0.0.1", 0), OpenAICompatible)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}/v1"
@@ -207,6 +220,7 @@ def test_real_litellm_against_openai_compatible_server(env_file):
             "CHUNKGUARD_LLM_API_KEY=unused\n"
             f"CHUNKGUARD_EMBEDDING_MODEL=openai/local-embed\nCHUNKGUARD_EMBEDDING_API_BASE={base}\n"
             "CHUNKGUARD_EMBEDDING_API_KEY=unused\nCHUNKGUARD_MIN_CHUNK_CHARS=0\n"
+            "CHUNKGUARD_MAX_RETRIES=1\nCHUNKGUARD_REQUEST_TIMEOUT=10\n"
         )
         chunks = chunker_from_env(path).split("d1", DOCUMENT, "de")
         async_chunks = asyncio.run(async_chunker_from_env(path).split("d1", DOCUMENT, "de"))
