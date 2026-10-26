@@ -222,8 +222,19 @@ LiteLLM versions 1.82.7 and 1.82.8 were compromised on PyPI in March 2026; the e
 - **The relevance flag is relative to the document.** Nearly every document has relevant and
   irrelevant chunks, however on-topic it is overall. Use it to weight or filter retrieval,
   not as an absolute quality score.
-- **Retrieval gains are the paper's results** on English Wikipedia and open-domain QA. This
-  repository does not reproduce them.
+- **Retrieval gains are the paper's results** on English Wikipedia and open-domain QA. Our
+  own small measurement ([eval/](eval/)) does not reproduce a gain for the paper's setting;
+  see above.
+
+## Does it help?
+
+[eval/](eval/) measures retrieval on the 48 Wikipedia articles of the SQuAD dev set, PIC
+against sentence, paragraph and fixed-size chunking, with the paper's embedding model
+(bge-large-en-v1.5) and Gemini Flash as summarizer. Preliminary result on 11 documents and
+300 questions: PIC in the paper's setting does not beat fixed-size chunking; PIC with
+`max_length=100` words and `min_length=50` is on par with or slightly ahead of it, within
+the noise of the sample. Full table and caveats in [eval/README.md](eval/README.md). Treat
+PIC as something to measure on your own corpus, not as a guaranteed gain.
 
 ## Development
 

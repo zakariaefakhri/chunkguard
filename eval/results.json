@@ -1,0 +1,62 @@
+{
+ "Sentence": {
+  "chunks": 2486,
+  "mean_words": 23.7,
+  "hits@1": 63.7,
+  "hits@5": 86.7,
+  "hits@20": 95.7,
+  "hits@200w": 90.0,
+  "hits@500w": 95.0
+ },
+ "Paragraph": {
+  "chunks": 574,
+  "mean_words": 102.4,
+  "hits@1": 71.3,
+  "hits@5": 94.3,
+  "hits@20": 99.0,
+  "hits@200w": 77.0,
+  "hits@500w": 92.3
+ },
+ "Fixed-size (100 words)": {
+  "chunks": 687,
+  "mean_words": 85.6,
+  "hits@1": 65.3,
+  "hits@5": 89.7,
+  "hits@20": 98.0,
+  "hits@200w": 82.0,
+  "hits@500w": 90.3
+ },
+ "PIC (paper: no length limits)": {
+  "chunks": 1078,
+  "mean_words": 54.5,
+  "hits@1": 64.0,
+  "hits@5": 87.7,
+  "hits@20": 95.7,
+  "hits@200w": 72.0,
+  "hits@500w": 84.0,
+  "relevant_share": 50.2,
+  "relevant_among_top5": 69.4
+ },
+ "PIC, merged to \u2265 50 words": {
+  "chunks": 516,
+  "mean_words": 113.9,
+  "hits@1": 66.0,
+  "hits@5": 88.3,
+  "hits@20": 97.7,
+  "hits@200w": 68.3,
+  "hits@500w": 84.0,
+  "relevant_share": 55.0,
+  "relevant_among_top5": 62.9
+ },
+ "PIC, 100-word cap, merged \u2265 50": {
+  "chunks": 814,
+  "mean_words": 72.2,
+  "hits@1": 71.3,
+  "hits@5": 90.3,
+  "hits@20": 98.3,
+  "hits@200w": 83.0,
+  "hits@500w": 91.3,
+  "relevant_share": 57.0,
+  "relevant_among_top5": 64.2
+ }
+}
