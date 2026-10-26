@@ -11,6 +11,8 @@ import re
 import sentencex
 
 _SHORT_NUMBER = re.compile(r"(?:^|(?<=\s))\d{1,3}\.$")
+# Characters looked at around a boundary; slicing the whole text per boundary is quadratic.
+_WINDOW = 16
 
 
 def split_sentences(text: str, language: str) -> list[tuple[int, int]]:
@@ -45,7 +47,7 @@ def _continues_lowercase(text: str, position: int) -> bool:
     sentencex misses this for some abbreviations and for non-ASCII letters such
     as "ü". Merging two sentences costs less than cutting one in half.
     """
-    rest = text[position:].lstrip(" \t")
+    rest = text[position : position + _WINDOW].lstrip(" \t")
     return bool(rest) and rest[0].islower()
 
 
@@ -56,4 +58,4 @@ def _ends_with_short_number(text: str, position: int) -> bool:
     Jahrhundert"); sentencex only knows the case before month names. The cost
     is a merged sentence in the rare English "We sold 3. Then ..." case.
     """
-    return _SHORT_NUMBER.search(text[:position].rstrip()) is not None
+    return _SHORT_NUMBER.search(text[max(0, position - _WINDOW) : position].rstrip()) is not None
