@@ -1,7 +1,17 @@
+import asyncio
+import re
+
 import pytest
 
-from chunkguard.backend import Settings, chunker_from_env
-from chunkguard.pic import PICChunker, _merge_short, _runs, _split_long
+from chunkguard.pic import (
+    SUMMARY_PROMPT,
+    AsyncPICChunker,
+    PICChunker,
+    _excerpt,
+    _merge_short,
+    _runs,
+    _split_long,
+)
 
 VOCABULARY = ["resort", "meer", "wohnung", "preis", "wetter", "parkplatz", "hund"]
 
@@ -15,11 +25,11 @@ class Fake:
 
     def __init__(self, summary: str) -> None:
         self.summary = summary
-        self.summarize_calls = 0
+        self.prompts: list[str] = []
         self.embed_calls: list[list[str]] = []
 
-    def summarize(self, text: str, language: str) -> str:
-        self.summarize_calls += 1
+    def complete(self, prompt: str) -> str:
+        self.prompts.append(prompt)
         return self.summary
 
     def embed(self, texts: list[str]) -> list[list[float]]:
@@ -39,7 +49,7 @@ DOCUMENT = (
 def make(summary: str = "Resort am Meer, Wohnung, Preis.", **limits) -> tuple[PICChunker, Fake]:
     fake = Fake(summary)
     limits = {"min_chars": 0, "max_chars": 10_000} | limits
-    return PICChunker(fake.summarize, fake.embed, **limits), fake
+    return PICChunker(fake.complete, fake.embed, **limits), fake
 
 
 def test_boundaries_where_relevance_flips():
@@ -50,7 +60,7 @@ def test_boundaries_where_relevance_flips():
     assert [(c.sentence_start, c.sentence_end) for c in chunks] == [(0, 2), (2, 4), (4, 5)]
     assert chunks[1].text == "Gestern war das Wetter schlecht. Ein Hund lief über den Parkplatz."
     assert chunks[0].similarity > chunks[1].similarity
-    assert fake.summarize_calls == 1
+    assert fake.prompts == [SUMMARY_PROMPT.format(text=DOCUMENT, language="de")]
     assert fake.embed_calls[0][0] == fake.summary
 
 
@@ -74,7 +84,7 @@ def test_chunks_are_exact_slices_in_order_and_lose_nothing():
 def test_empty_document_makes_no_calls():
     chunker, fake = make()
     assert chunker.split("d1", " \n ", "de") == []
-    assert fake.summarize_calls == 0 and fake.embed_calls == []
+    assert fake.prompts == [] and fake.embed_calls == []
 
 
 def test_runs():
@@ -126,35 +136,89 @@ def test_merged_chunk_flag_follows_its_mean_similarity():
     assert all(c.relevant for c in chunks)
 
 
-def test_from_env_builds_azure_and_compatible_clients(tmp_path, monkeypatch):
-    for key in list(Settings.model_fields):
-        monkeypatch.delenv(f"CHUNKGUARD_{key.upper()}", raising=False)
-    env = tmp_path / ".env"
-    env.write_text(
-        "CHUNKGUARD_LLM_PROVIDER=azure\n"
-        "CHUNKGUARD_LLM_MODEL=gpt-deploy\n"
-        "CHUNKGUARD_LLM_API_KEY=k\n"
-        "CHUNKGUARD_LLM_BASE_URL=https://x.openai.azure.com\n"
-        "CHUNKGUARD_LLM_API_VERSION=2024-10-21\n"
-        "CHUNKGUARD_EMBEDDING_MODEL=bge-m3\n"
-        "CHUNKGUARD_EMBEDDING_API_KEY=k\n"
-        "CHUNKGUARD_EMBEDDING_BASE_URL=http://localhost:8080/v1\n"
-        "CHUNKGUARD_EMBEDDING_API_VERSION=\n"
-        "CHUNKGUARD_MAX_CHUNK_CHARS=1500\n"
+def test_paper_mode_without_length_limits():
+    chunker, _ = make(max_chars=None, min_chars=0)
+    chunks = chunker.split("d1", DOCUMENT, "de")
+    assert [(c.sentence_start, c.sentence_end) for c in chunks] == [(0, 2), (2, 4), (4, 5)]
+
+
+def test_custom_sentence_splitter():
+    fake = Fake("Resort")
+    lines = lambda text, language: [  # noqa: E731
+        (m.start(), m.end()) for m in re.finditer(r"[^|]+", text)
+    ]
+    chunker = PICChunker(fake.complete, fake.embed, min_chars=0, sentence_splitter=lines)
+    chunks = chunker.split("d1", "Resort A|Hund B|Resort C", "xx")
+    assert [c.text for c in chunks] == ["Resort A", "Hund B", "Resort C"]
+
+
+def test_long_document_summary_sees_evenly_spread_excerpt():
+    text = "".join(f"Satz {i:05d} ist da. " for i in range(10_000))
+    seen = []
+    chunker = PICChunker(
+        lambda prompt: seen.append(prompt) or "Satz", bag_of_words, summary_max_chars=8_000
     )
-    chunker = chunker_from_env(str(env))
-    assert chunker.max_chars == 1500 and chunker.min_chars == 200
-
-    llm = chunker.summarize.__closure__
-    embedder = chunker.embed.__closure__
-    clients = {type(c.cell_contents).__name__ for c in llm + embedder}
-    assert {"AzureOpenAI", "OpenAI"} <= clients
+    chunker.split("d1", text, "de")
+    excerpt = seen[0]
+    assert len(excerpt) <= 8_000 + 7 * len("\n[…]\n") + len(SUMMARY_PROMPT)
+    assert "Satz 00000" in excerpt and "Satz 09999" in excerpt and "Satz 05" in excerpt
+    assert _excerpt("kurz", 8_000) == "kurz"
 
 
-def test_missing_model_config_fails(tmp_path, monkeypatch):
-    for key in list(Settings.model_fields):
-        monkeypatch.delenv(f"CHUNKGUARD_{key.upper()}", raising=False)
-    env = tmp_path / ".env"
-    env.write_text("CHUNKGUARD_LLM_API_KEY=k\n")
+def test_empty_summary_is_an_error():
+    chunker = PICChunker(lambda prompt: "  ", bag_of_words)
+    with pytest.raises(ValueError, match="empty summary"):
+        chunker.split("d1", DOCUMENT, "de")
+
+
+def test_wrong_number_of_embeddings_is_an_error():
+    chunker = PICChunker(lambda prompt: "Resort", lambda texts: [[1.0]])
+    with pytest.raises(ValueError, match="embeddings"):
+        chunker.split("d1", DOCUMENT, "de")
+
+
+@pytest.mark.parametrize(
+    "options",
+    [{"max_chars": 0}, {"min_chars": -1}, {"min_chars": 300, "max_chars": 200}],
+)
+def test_invalid_limits(options):
     with pytest.raises(ValueError):
-        chunker_from_env(str(env))
+        PICChunker(lambda prompt: "", bag_of_words, **options)
+
+
+def test_async_chunker_matches_sync():
+    fake = Fake("Resort am Meer, Wohnung, Preis.")
+
+    async def complete(prompt):
+        return fake.complete(prompt)
+
+    async def embed(texts):
+        return fake.embed(texts)
+
+    sync_chunks, _ = make()
+    expected = sync_chunks.split("d1", DOCUMENT, "de")
+    chunker = AsyncPICChunker(complete, embed, min_chars=0, max_chars=10_000)
+    assert asyncio.run(chunker.split("d1", DOCUMENT, "de")) == expected
+    assert len(fake.prompts) == 1
+
+
+def test_async_summary_sees_excerpt():
+    seen = []
+
+    async def complete(prompt):
+        seen.append(prompt)
+        return "Satz"
+
+    async def embed(texts):
+        return bag_of_words(texts)
+
+    chunker = AsyncPICChunker(complete, embed, summary_max_chars=1_000)
+    asyncio.run(chunker.split("d1", "Ein Satz ist da. " * 1_000, "de"))
+    assert len(seen[0]) < 1_100 + len(SUMMARY_PROMPT)
+
+
+def test_custom_summary_prompt():
+    fake = Fake("Resort")
+    chunker = PICChunker(fake.complete, fake.embed, summary_prompt="[{language}] {text}")
+    chunker.split("d1", "Resort am Meer.", "it")
+    assert fake.prompts == ["[it] Resort am Meer."]

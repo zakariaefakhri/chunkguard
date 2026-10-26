@@ -49,3 +49,16 @@ def test_spans_cover_all_non_whitespace():
 
 def test_empty_text():
     assert split_sentences("   \n ", "de") == []
+
+
+def test_full_width_terminators_need_no_space():
+    assert sentences("東京は大きい。大阪も「大きい！」京都は？", "ja") == [
+        "東京は大きい。",
+        "大阪も「大きい！」",
+        "京都は？",
+    ]
+
+
+def test_arabic_and_devanagari_terminators():
+    assert len(sentences("هل أنت بخير؟ نعم", "ar")) == 2
+    assert len(sentences("यह घर है। वह बड़ा है।", "hi")) == 2

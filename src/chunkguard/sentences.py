@@ -19,8 +19,10 @@ _ORDINAL_LANGUAGES = {"de", "hu"}
 
 # word before the terminator, terminator plus closing quotes, first char after the gap
 _SENTENCE_END = re.compile(
-    r"(?P<word>[^\s.!?…]*)(?P<end>[.!?…]+[\"'»«“”’)\]]*)(?=\s+(?P<next>\S)|\s*$)"
+    r"(?P<word>[^\s.!?…؟।]*)(?P<end>[.!?…؟।]+[\"'»«“”’)\]]*)(?=\s+(?P<next>\S)|\s*$)"
 )
+# Chinese/Japanese full-width terminators end a sentence without a following space.
+_FULL_WIDTH_END = re.compile(r"[。！？]+[」』”’）)]*")
 
 
 def split_sentences(text: str, language: str) -> list[tuple[int, int]]:
@@ -34,6 +36,7 @@ def split_sentences(text: str, language: str) -> list[tuple[int, int]]:
     ordinals = lang in _ORDINAL_LANGUAGES
 
     cuts = {i for i, char in enumerate(text) if char == "\n"}
+    cuts.update(match.end() for match in _FULL_WIDTH_END.finditer(text))
     for match in _SENTENCE_END.finditer(text):
         if _is_boundary(match, abbreviations, ordinals):
             cuts.add(match.end())
@@ -54,7 +57,7 @@ def _is_boundary(match: re.Match[str], abbreviations: set[str], ordinals: bool) 
     following = match.group("next")
     if following is None or following.islower():
         return False
-    if any(char in "!?…" for char in match.group("end")):
+    if any(char in "!?…؟।" for char in match.group("end")):
         return True
     word = match.group("word").lstrip("([\"'»«„“")
     if len(word) == 1 and word.isalpha():

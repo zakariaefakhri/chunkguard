@@ -1,26 +1,47 @@
-"""PIC: Pseudo-Instruction for document Chunking (Wang et al., ACL 2025).
+"""PIC: Pseudo-Instruction for document Chunking (Wang et al., Findings of ACL 2025).
 
 An LLM summary of the document stands in for the unknown user queries. Every
 sentence is compared with that summary; the mean similarity is the threshold.
 Runs of neighbouring sentences on the same side of the threshold form a chunk,
 so boundaries sit exactly where the text turns towards or away from the topic.
+
+Splitting long and merging short chunks is not part of the paper; both can be
+switched off (max_chars=None, min_chars=0).
 """
 
+from __future__ import annotations
+
 import math
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from statistics import fmean
 
 from pydantic import BaseModel
 
 from chunkguard.sentences import split_sentences
 
-# (document text, language) -> summary
-Summarize = Callable[[str, str], str]
-# texts -> one vector per text, same order
+Span = tuple[int, int]
+# (text, language) -> sentence spans, see chunkguard.sentences
+SentenceSplitter = Callable[[str, str], list[Span]]
+# Any LLM: prompt -> completion text
+Complete = Callable[[str], str]
+AsyncComplete = Callable[[str], Awaitable[str]]
+# Any embedding model: texts -> one vector per text, same order
 Embed = Callable[[list[str]], list[list[float]]]
+AsyncEmbed = Callable[[list[str]], Awaitable[list[list[float]]]]
+
+# Summarizer prompt from the PIC paper (Appendix C), plus the output language.
+SUMMARY_PROMPT = (
+    "Read this passage:\n{text}\n"
+    "Write a summary for this passage. Your summary should be concise and informative. "
+    "Give the summary directly, without any other text. "
+    "Write it in the language of the passage (language code: {language})."
+)
 
 # A sentence range [first, end) within the document.
 Group = tuple[int, int]
+
+# Pieces of a long document the summarizer sees, spread evenly over the text.
+_EXCERPT_PIECES = 8
 
 
 class Chunk(BaseModel):
@@ -38,34 +59,53 @@ class Chunk(BaseModel):
     summary: str
 
 
-class PICChunker:
-    """Text in, chunks out. Swappable with any splitter of the same signature."""
-
+class _Chunker:
     def __init__(
         self,
-        summarize: Summarize,
-        embed: Embed,
-        max_chars: int = 2000,
+        *,
+        max_chars: int | None = 2000,
         min_chars: int = 200,
+        summary_max_chars: int | None = 100_000,
+        summary_prompt: str = SUMMARY_PROMPT,
+        sentence_splitter: SentenceSplitter = split_sentences,
     ) -> None:
-        self.summarize = summarize
-        self.embed = embed
+        if max_chars is not None and max_chars < 1:
+            raise ValueError("max_chars must be positive or None")
+        if min_chars < 0 or (max_chars is not None and min_chars > max_chars):
+            raise ValueError("min_chars must be between 0 and max_chars")
+        if summary_max_chars is not None and summary_max_chars < _EXCERPT_PIECES:
+            raise ValueError(f"summary_max_chars must be at least {_EXCERPT_PIECES} or None")
         self.max_chars = max_chars
         self.min_chars = min_chars
+        self.summary_max_chars = summary_max_chars
+        self.summary_prompt = summary_prompt
+        self.sentence_splitter = sentence_splitter
 
-    def split(self, doc_id: str, text: str, language: str) -> list[Chunk]:
-        spans = split_sentences(text, language)
-        if not spans:
-            return []
+    def _prompt(self, text: str, language: str) -> str:
+        excerpt = _excerpt(text, self.summary_max_chars)
+        return self.summary_prompt.format(text=excerpt, language=language)
 
-        summary = self.summarize(text, language)
-        reference, *vectors = self.embed([summary, *(text[s:e] for s, e in spans)])
-        similarities = [_cosine(reference, vector) for vector in vectors]
+    def _chunks(
+        self,
+        doc_id: str,
+        text: str,
+        spans: list[Span],
+        summary: str,
+        vectors: list[list[float]],
+    ) -> list[Chunk]:
+        if not summary:
+            raise ValueError(f"LLM returned an empty summary for {doc_id!r}")
+        if len(vectors) != len(spans) + 1:
+            raise ValueError(f"expected {len(spans) + 1} embeddings, got {len(vectors)}")
+
+        reference, *sentence_vectors = vectors
+        similarities = [_cosine(reference, vector) for vector in sentence_vectors]
         threshold = fmean(similarities)
+        max_chars = math.inf if self.max_chars is None else self.max_chars
 
         groups = _runs([s >= threshold for s in similarities])
-        groups = [p for g in groups for p in _split_long(g, spans, self.max_chars)]
-        groups = _merge_short(groups, spans, similarities, self.min_chars, self.max_chars)
+        groups = [p for g in groups for p in _split_long(g, spans, max_chars)]
+        groups = _merge_short(groups, spans, similarities, self.min_chars, max_chars)
 
         chunks = []
         for index, (first, end) in enumerate(groups):
@@ -91,6 +131,58 @@ class PICChunker:
         return chunks
 
 
+class PICChunker(_Chunker):
+    """Text in, chunks out. Swappable with any splitter of the same signature.
+
+    Costs one LLM call and one embed call (for all sentences) per document.
+    """
+
+    def __init__(self, complete: Complete, embed: Embed, **options) -> None:
+        super().__init__(**options)
+        self.complete = complete
+        self.embed = embed
+
+    def split(self, doc_id: str, text: str, language: str) -> list[Chunk]:
+        spans = self.sentence_splitter(text, language)
+        if not spans:
+            return []
+        summary = self.complete(self._prompt(text, language)).strip()
+        vectors = self.embed([summary, *(text[s:e] for s, e in spans)])
+        return self._chunks(doc_id, text, spans, summary, vectors)
+
+
+class AsyncPICChunker(_Chunker):
+    """PICChunker with async complete/embed for asyncio indexing pipelines."""
+
+    def __init__(self, complete: AsyncComplete, embed: AsyncEmbed, **options) -> None:
+        super().__init__(**options)
+        self.complete = complete
+        self.embed = embed
+
+    async def split(self, doc_id: str, text: str, language: str) -> list[Chunk]:
+        spans = self.sentence_splitter(text, language)
+        if not spans:
+            return []
+        summary = (await self.complete(self._prompt(text, language))).strip()
+        vectors = await self.embed([summary, *(text[s:e] for s, e in spans)])
+        return self._chunks(doc_id, text, spans, summary, vectors)
+
+
+def _excerpt(text: str, limit: int | None) -> str:
+    """Shorten text to about limit characters, taking evenly spread pieces.
+
+    Keeps the summary within the LLM's context window while every part of the
+    document still contributes to it.
+    """
+    if limit is None or len(text) <= limit:
+        return text
+    size = limit // _EXCERPT_PIECES
+    step = (len(text) - size) / (_EXCERPT_PIECES - 1)
+    return "\n[…]\n".join(
+        text[round(i * step) : round(i * step) + size] for i in range(_EXCERPT_PIECES)
+    )
+
+
 def _cosine(a: list[float], b: list[float]) -> float:
     norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
     return sum(x * y for x, y in zip(a, b, strict=True)) / norm if norm else 0.0
@@ -107,12 +199,12 @@ def _runs(flags: list[bool]) -> list[Group]:
     return groups
 
 
-def _length(spans: list[tuple[int, int]], group: Group) -> int:
+def _length(spans: list[Span], group: Group) -> int:
     first, end = group
     return spans[end - 1][1] - spans[first][0]
 
 
-def _split_long(group: Group, spans: list[tuple[int, int]], max_chars: int) -> list[Group]:
+def _split_long(group: Group, spans: list[Span], max_chars: float) -> list[Group]:
     """Split at sentence boundaries into near-equal pieces of at most max_chars.
 
     A single sentence longer than max_chars stays whole.
@@ -134,10 +226,10 @@ def _split_long(group: Group, spans: list[tuple[int, int]], max_chars: int) -> l
 
 def _merge_short(
     groups: list[Group],
-    spans: list[tuple[int, int]],
+    spans: list[Span],
     similarities: list[float],
     min_chars: int,
-    max_chars: int,
+    max_chars: float,
 ) -> list[Group]:
     """Merge chunks below min_chars into the neighbour with the closest mean similarity.
 
