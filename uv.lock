@@ -405,7 +405,7 @@ wheels = [
 
 [[package]]
 name = "chunkguard"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
@@ -417,6 +417,9 @@ litellm = [
     { name = "litellm" },
     { name = "pydantic-settings" },
 ]
+tokens = [
+    { name = "tiktoken" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -424,6 +427,7 @@ dev = [
     { name = "pydantic-settings" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "tiktoken" },
 ]
 
 [package.metadata]
@@ -432,8 +436,9 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", marker = "extra == 'litellm'", specifier = ">=2.2" },
     { name = "sentencex", specifier = ">=1.0.30" },
+    { name = "tiktoken", marker = "extra == 'tokens'", specifier = ">=0.8" },
 ]
-provides-extras = ["litellm"]
+provides-extras = ["litellm", "tokens"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -441,6 +446,7 @@ dev = [
     { name = "pydantic-settings", specifier = ">=2.2" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.6" },
+    { name = "tiktoken", specifier = ">=0.8" },
 ]
 
 [[package]]

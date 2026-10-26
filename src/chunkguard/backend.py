@@ -7,18 +7,27 @@ such as "openai/gpt-4.1-mini", "anthropic/claude-sonnet-5-5", "gemini/gemini-2.5
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 try:
     import litellm
-    from pydantic import ValidationError
+    from pydantic import AliasChoices, Field, ValidationError
     from pydantic_settings import BaseSettings, SettingsConfigDict
 except ImportError as error:
     raise ImportError(
         'chunker_from_env needs the litellm extra: pip install "chunkguard[litellm]"'
     ) from error
 
-from chunkguard.pic import AsyncComplete, AsyncEmbed, AsyncPICChunker, Complete, Embed, PICChunker
+from chunkguard.pic import (
+    AsyncComplete,
+    AsyncEmbed,
+    AsyncPICChunker,
+    Complete,
+    Embed,
+    Length,
+    PICChunker,
+)
+from chunkguard.tokens import token_length
 
 # Most providers accept far more, but Cohere caps a request at 96 inputs.
 DEFAULT_EMBED_BATCH_SIZE = 64
@@ -49,8 +58,17 @@ class Settings(BaseSettings):
     request_timeout: float = 120
     max_retries: int = 2
 
-    max_chunk_chars: int = 2000  # 0 = no limit
-    min_chunk_chars: int = 0  # e.g. 200 merges shorter chunks into a neighbour
+    # Limits in LENGTH_UNIT. The *_CHARS names from 0.1 are still read.
+    max_chunk_length: int = Field(  # 0 = no limit
+        2000,
+        validation_alias=AliasChoices("CHUNKGUARD_MAX_CHUNK_LENGTH", "CHUNKGUARD_MAX_CHUNK_CHARS"),
+    )
+    min_chunk_length: int = Field(  # e.g. 200 merges shorter chunks into a neighbour
+        0,
+        validation_alias=AliasChoices("CHUNKGUARD_MIN_CHUNK_LENGTH", "CHUNKGUARD_MIN_CHUNK_CHARS"),
+    )
+    length_unit: Literal["chars", "tokens"] = "chars"
+    token_encoding: str = "o200k_base"  # tiktoken encoding, LENGTH_UNIT=tokens only
     summary_max_chars: int = 100_000  # 0 = send the whole document
 
 
@@ -136,9 +154,11 @@ def _parts(env_file: str) -> tuple[Settings, dict, dict, dict]:
         ) from error
     llm = _connection(s.llm_api_key, s.llm_api_base, s.llm_api_version, s)
     embedder = _connection(s.embedding_api_key, s.embedding_api_base, s.embedding_api_version, s)
+    length: Length = len if s.length_unit == "chars" else token_length(s.token_encoding)
     options = {
-        "max_chars": s.max_chunk_chars or None,
-        "min_chars": s.min_chunk_chars,
+        "max_length": s.max_chunk_length or None,
+        "min_length": s.min_chunk_length,
+        "length": length,
         "summary_max_chars": s.summary_max_chars or None,
     }
     return s, llm, embedder, options

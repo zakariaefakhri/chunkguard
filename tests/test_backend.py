@@ -116,7 +116,12 @@ def test_zero_switches_limits_off_and_empty_counts_as_unset(env_file):
         0,
     )
     for chunker in (chunker_from_env(path), async_chunker_from_env(path)):
-        assert (chunker.max_chars, chunker.min_chars, chunker.summary_max_chars) == (None, 0, None)
+        assert (chunker.max_length, chunker.min_length, chunker.summary_max_chars) == (
+            None,
+            0,
+            None,
+        )
+        assert chunker.length is len
 
 
 def test_missing_model_names_the_variables(env_file):
@@ -210,3 +215,21 @@ def test_real_litellm_against_openai_compatible_server(env_file):
     assert [c.relevant for c in chunks] == [True, False, True]
     assert chunks[0].summary == "Resort am Meer"
     assert async_chunks == chunks
+
+
+def test_new_limit_names_and_token_unit(env_file, recorder):
+    path = env_file(
+        "CHUNKGUARD_LLM_MODEL=m\nCHUNKGUARD_EMBEDDING_MODEL=e\n"
+        "CHUNKGUARD_MAX_CHUNK_LENGTH=512\nCHUNKGUARD_MIN_CHUNK_LENGTH=32\n"
+        "CHUNKGUARD_LENGTH_UNIT=tokens\n"
+    )
+    chunker = chunker_from_env(path)
+    assert (chunker.max_length, chunker.min_length) == (512, 32)
+    assert chunker.length("Das Resort liegt am Meer.") < len("Das Resort liegt am Meer.")
+
+
+def test_token_length_counts_tokens():
+    from chunkguard import token_length
+
+    count = token_length("o200k_base")
+    assert 0 < count("Hallig Hooge liegt im Wattenmeer.") < 12

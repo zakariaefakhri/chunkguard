@@ -2,6 +2,7 @@
 
 from chunkguard.pic import SUMMARY_PROMPT, AsyncPICChunker, Chunk, PICChunker
 from chunkguard.sentences import split_sentences
+from chunkguard.tokens import token_length
 
 __all__ = [
     "SUMMARY_PROMPT",
@@ -11,6 +12,7 @@ __all__ = [
     "async_chunker_from_env",
     "chunker_from_env",
     "split_sentences",
+    "token_length",
 ]
 
 

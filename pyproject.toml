@@ -1,6 +1,6 @@
 [project]
 name = "chunkguard"
-version = "0.1.1"
+version = "0.2.0"
 description = "PIC document chunking for RAG with any LLM and embedding model"
 readme = "README.md"
 license = "MIT"
@@ -25,6 +25,8 @@ dependencies = ["pydantic>=2.0", "sentencex>=1.0.30"]
 [project.optional-dependencies]
 # .env configuration for any provider. 1.82.7/1.82.8 were compromised on PyPI.
 litellm = ["litellm>=1.83.0", "pydantic-settings>=2.2"]
+# Token-based chunk limits.
+tokens = ["tiktoken>=0.8"]
 
 [project.urls]
 Homepage = "https://github.com/zakariaefakhri/chunkguard"
@@ -32,7 +34,7 @@ Issues = "https://github.com/zakariaefakhri/chunkguard/issues"
 Paper = "https://aclanthology.org/2025.findings-acl.422/"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "litellm>=1.83.0", "pydantic-settings>=2.2"]
+dev = ["pytest>=8", "ruff>=0.6", "litellm>=1.83.0", "pydantic-settings>=2.2", "tiktoken>=0.8"]
 
 [build-system]
 requires = ["hatchling>=1.27"]

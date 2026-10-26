@@ -53,8 +53,9 @@ chunker = PICChunker(complete=complete, embed=lambda texts: encoder.encode(texts
 chunks = chunker.split(doc_id="report-7", text=cleaned_text, language="en")
 ```
 
-Options: `max_chars` (default 2000), `min_chars` (default 0, see below), `summary_max_chars`,
-`summary_prompt`, `sentence_splitter`.
+Options: `max_length` (default 2000), `min_length` (default 0), `length` (default `len`, see
+[Token-based limits](#token-based-limits)), `summary_max_chars`, `summary_prompt`,
+`sentence_splitter`.
 
 **Option 2: `.env` with LiteLLM.** Install the extra, copy [`.env.example`](.env.example) to
 `.env` and set the two models as [LiteLLM strings](https://docs.litellm.ai/docs/providers):
@@ -85,6 +86,7 @@ joined). Each `Chunk` carries:
 | Field | Meaning |
 |---|---|
 | `doc_id`, `index` | Document and position of the chunk in it |
+| `language` | The language passed to `split` |
 | `text` | Exact slice `input[start:end]` |
 | `start`, `end` | Character offsets into the input (end exclusive) |
 | `sentence_start`, `sentence_end` | Sentence range (end exclusive) |
@@ -104,6 +106,30 @@ chunks = await chunker.split("report-7", cleaned_text, "en")
 ```
 
 `AsyncPICChunker` takes async `complete` and `embed` functions in the same way.
+
+### Reusing the summary
+
+Every `split` call asks the LLM for a summary. Pass one you stored to skip that call, for
+example to re-chunk with other limits, or to keep boundaries reproducible (LLM output varies
+between calls):
+
+```python
+chunks = chunker.split("report-7", cleaned_text, "en", summary=chunks[0].summary)
+```
+
+### Token-based limits
+
+`max_length` and `min_length` are measured by `length`, which is `len` (characters) by
+default. Embedding models limit tokens, so you can count those instead:
+
+```python
+from chunkguard import PICChunker, token_length  # pip install "chunkguard[tokens]"
+
+chunker = PICChunker(complete, embed, max_length=512, length=token_length("o200k_base"))
+```
+
+Any `str -> int` function works, for example your embedding model's own tokenizer. tiktoken
+downloads the encoding on first use.
 
 ### Your own summary prompt
 
@@ -144,10 +170,10 @@ chunker = PICChunker(complete, embed, sentence_splitter=nltk_sentences)
 
 Steps 1 to 5 are the method as published. chunkguard adds three things for production use:
 
-6. **Long chunks** (over `max_chars`, default 2000) are split at sentence boundaries into
-   near-equal pieces. `max_chars=None` switches this off.
+6. **Long chunks** (over `max_length`, default 2000 characters) are split at sentence
+   boundaries into near-equal pieces. `max_length=None` switches this off.
 7. **Short chunks** merge into the neighbour with the closest mean similarity when you set
-   `min_chars` (off by default), unless that would exceed `max_chars`. A merged chunk is
+   `min_length` (off by default), unless that would exceed `max_length`. A merged chunk is
    `relevant` when its relevant sentences make up at least half of its text. Note that with
    merging, a short document can end up as a single chunk.
 8. **Long documents** reach the summarizer as eight evenly spread excerpts totalling
@@ -156,7 +182,7 @@ Steps 1 to 5 are the method as published. chunkguard adds three things for produ
 
 ## Configuration
 
-With plain functions, pass the options to `PICChunker` (`max_chars`, `min_chars`,
+With plain functions, pass the options to `PICChunker` (`max_length`, `min_length`, `length`,
 `summary_max_chars`, `summary_prompt`, `sentence_splitter`). With the LiteLLM extra, they come
 from environment variables or `.env`, prefixed `CHUNKGUARD_`:
 
@@ -170,8 +196,10 @@ from environment variables or `.env`, prefixed `CHUNKGUARD_`:
 | `EMBEDDING_BATCH_SIZE` | `64` | Texts per embedding request |
 | `REQUEST_TIMEOUT` | `120` | Seconds per request |
 | `MAX_RETRIES` | `2` | Retries per request on provider errors |
-| `MAX_CHUNK_CHARS` | `2000` | Split longer chunks; `0` = no limit |
-| `MIN_CHUNK_CHARS` | `0` | Merge shorter chunks into a neighbour; `0` = off |
+| `MAX_CHUNK_LENGTH` | `2000` | Split longer chunks; `0` = no limit |
+| `MIN_CHUNK_LENGTH` | `0` | Merge shorter chunks into a neighbour; `0` = off |
+| `LENGTH_UNIT` | `chars` | `chars` or `tokens` (tiktoken, extra `tokens`) |
+| `TOKEN_ENCODING` | `o200k_base` | tiktoken encoding for `LENGTH_UNIT=tokens` |
 | `SUMMARY_MAX_CHARS` | `100000` | Excerpt longer documents for the summary; `0` = send all |
 
 Embedding requests stay below 400,000 characters each. A sentence longer than 8,000
@@ -188,8 +216,9 @@ LiteLLM versions 1.82.7 and 1.82.8 were compromised on PyPI in March 2026; the e
   ("im 18. Jahrhundert"), which merges the rare English "We sold 3. Then ..." into one
   sentence. Some boundaries are still missed (a sentence ending in "etc."), and languages
   without sentence punctuation (Thai) are not split. Pass your own splitter if that matters.
-- **Sizes are in characters, not tokens.** Pick `MAX_CHUNK_CHARS` with your embedding model's
-  token limit in mind.
+- **Lengths count sentences, not gaps.** A chunk's length is the sum of its sentences; the
+  whitespace between them is not counted, so a chunk can exceed `max_length` by a few
+  characters of spacing.
 - **The relevance flag is relative to the document.** Nearly every document has relevant and
   irrelevant chunks, however on-topic it is overall. Use it to weight or filter retrieval,
   not as an absolute quality score.

@@ -48,7 +48,7 @@ DOCUMENT = (
 
 def make(summary: str = "Resort am Meer, Wohnung, Preis.", **limits) -> tuple[PICChunker, Fake]:
     fake = Fake(summary)
-    limits = {"min_chars": 0, "max_chars": 10_000} | limits
+    limits = {"min_length": 0, "max_length": 10_000} | limits
     return PICChunker(fake.complete, fake.embed, **limits), fake
 
 
@@ -92,52 +92,39 @@ def test_runs():
     assert _runs([False]) == [(0, 1)]
 
 
-def spans_of(lengths: list[int]) -> list[tuple[int, int]]:
-    """Sentence spans of the given lengths, separated by one space."""
-    spans, pos = [], 0
-    for n in lengths:
-        spans.append((pos, pos + n))
-        pos += n + 1
-    return spans
-
-
 def test_split_long_into_near_equal_pieces_at_sentence_boundaries():
-    spans = spans_of([30] * 10)  # 309 chars
-    pieces = _split_long((0, 10), spans, max_chars=200)
+    pieces = _split_long((0, 10), [30] * 10, max_length=200)  # 300 in total
     assert pieces == [(0, 5), (5, 10)]
 
 
 def test_single_overlong_sentence_stays_whole():
-    spans = spans_of([50, 500, 50])
-    pieces = _split_long((0, 3), spans, max_chars=100)
+    pieces = _split_long((0, 3), [50, 500, 50], max_length=100)
     assert (1, 2) in pieces
     assert pieces[0][0] == 0 and pieces[-1][1] == 3
 
 
 def test_merge_short_into_neighbour_with_closest_similarity():
-    spans = spans_of([100, 10, 100])
     similarities = [0.9, 0.2, 0.3]
-    groups = _merge_short([(0, 1), (1, 2), (2, 3)], spans, similarities, 50, 1000)
+    groups = _merge_short([(0, 1), (1, 2), (2, 3)], [100, 10, 100], similarities, 50, 1000)
     assert groups == [(0, 1), (1, 3)]
 
 
 def test_merge_short_never_exceeds_max():
-    spans = spans_of([100, 10, 100])
-    groups = _merge_short([(0, 1), (1, 2), (2, 3)], spans, [0.9, 0.2, 0.3], 50, 105)
+    groups = _merge_short([(0, 1), (1, 2), (2, 3)], [100, 10, 100], [0.9, 0.2, 0.3], 50, 105)
     assert groups == [(0, 1), (1, 2), (2, 3)]
 
 
 def test_merged_chunk_flag_follows_its_mean_similarity():
     # Short irrelevant sentence between two long relevant runs gets absorbed.
     text = "Resort Meer Wohnung Preis. " * 4 + "Hund. " + "Resort Meer Wohnung Preis. " * 4
-    chunker, _ = make(min_chars=20)
+    chunker, _ = make(min_length=20)
     chunks = chunker.split("d1", text.strip(), "de")
     assert len(chunks) == 2
     assert all(c.relevant for c in chunks)
 
 
 def test_paper_mode_without_length_limits():
-    chunker, _ = make(max_chars=None, min_chars=0)
+    chunker, _ = make(max_length=None, min_length=0)
     chunks = chunker.split("d1", DOCUMENT, "de")
     assert [(c.sentence_start, c.sentence_end) for c in chunks] == [(0, 2), (2, 4), (4, 5)]
 
@@ -147,7 +134,7 @@ def test_custom_sentence_splitter():
     lines = lambda text, language: [  # noqa: E731
         (m.start(), m.end()) for m in re.finditer(r"[^|]+", text)
     ]
-    chunker = PICChunker(fake.complete, fake.embed, min_chars=0, sentence_splitter=lines)
+    chunker = PICChunker(fake.complete, fake.embed, min_length=0, sentence_splitter=lines)
     chunks = chunker.split("d1", "Resort A|Hund B|Resort C", "xx")
     assert [c.text for c in chunks] == ["Resort A", "Hund B", "Resort C"]
 
@@ -175,7 +162,7 @@ def test_empty_summary_is_an_error(answer):
 def test_defaults_follow_the_paper_except_a_length_cap():
     chunker, _ = make()
     chunker = PICChunker(chunker.complete, chunker.embed)
-    assert (chunker.max_chars, chunker.min_chars) == (2000, 0)
+    assert (chunker.max_length, chunker.min_length) == (2000, 0)
     assert [c.sentence_end - c.sentence_start for c in chunker.split("d1", DOCUMENT, "de")] == [
         2,
         2,
@@ -191,7 +178,7 @@ def test_wrong_number_of_embeddings_is_an_error():
 
 @pytest.mark.parametrize(
     "options",
-    [{"max_chars": 0}, {"min_chars": -1}, {"min_chars": 300, "max_chars": 200}],
+    [{"max_length": 0}, {"min_length": -1}, {"min_length": 300, "max_length": 200}],
 )
 def test_invalid_limits(options):
     with pytest.raises(ValueError):
@@ -209,7 +196,7 @@ def test_async_chunker_matches_sync():
 
     sync_chunks, _ = make()
     expected = sync_chunks.split("d1", DOCUMENT, "de")
-    chunker = AsyncPICChunker(complete, embed, min_chars=0, max_chars=10_000)
+    chunker = AsyncPICChunker(complete, embed, min_length=0, max_length=10_000)
     assert asyncio.run(chunker.split("d1", DOCUMENT, "de")) == expected
     assert len(fake.prompts) == 1
 
@@ -234,3 +221,54 @@ def test_custom_summary_prompt():
     chunker = PICChunker(fake.complete, fake.embed, summary_prompt="[{language}] {text}")
     chunker.split("d1", "Resort am Meer.", "it")
     assert fake.prompts == ["[it] Resort am Meer."]
+
+
+def test_stored_summary_skips_the_llm():
+    chunker, fake = make()
+    first = chunker.split("d1", DOCUMENT, "de")
+    again = chunker.split("d1", DOCUMENT, "de", summary=first[0].summary)
+    assert again == first
+    assert len(fake.prompts) == 1
+    with pytest.raises(ValueError, match="empty summary"):
+        chunker.split("d1", DOCUMENT, "de", summary="  ")
+
+
+def test_async_stored_summary_skips_the_llm():
+    calls = []
+
+    async def complete(prompt):
+        calls.append(prompt)
+        return "x"
+
+    async def embed(texts):
+        return bag_of_words(texts)
+
+    chunker = AsyncPICChunker(complete, embed)
+    chunks = asyncio.run(chunker.split("d1", DOCUMENT, "de", summary="Resort am Meer"))
+    assert calls == [] and chunks[0].summary == "Resort am Meer"
+
+
+def test_chunks_carry_the_language():
+    chunker, _ = make()
+    assert {c.language for c in chunker.split("d1", DOCUMENT, "de")} == {"de"}
+
+
+def test_limits_follow_the_length_function():
+    words = lambda text: len(text.split())  # noqa: E731
+    # Every sentence of DOCUMENT has 5 to 8 words and 25 to 45 characters.
+    chunker, _ = make(max_length=12, length=words)  # pairs have 11 words: paper grouping
+    assert [(c.sentence_start, c.sentence_end) for c in chunker.split("d1", DOCUMENT, "de")] == [
+        (0, 2),
+        (2, 4),
+        (4, 5),
+    ]
+    chunker, _ = make(max_length=12)  # 12 characters: every sentence on its own
+    assert len(chunker.split("d1", DOCUMENT, "de")) == 5
+    chunker, _ = make(min_length=9, length=words)  # only the 8-word last chunk merges
+    assert len(chunker.split("d1", DOCUMENT, "de")) == 2
+
+
+def test_old_limit_names_still_work_with_a_warning():
+    with pytest.warns(DeprecationWarning, match="max_length"):
+        chunker = PICChunker(lambda p: "s", bag_of_words, max_chars=300, min_chars=10)
+    assert (chunker.max_length, chunker.min_length) == (300, 10)
