@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 (2026-10-26)
+
+- The `litellm` extra now installs `tenacity`, which LiteLLM needs for `num_retries` but does
+  not declare. Without it, the first provider error raised "tenacity import failed" instead
+  of retrying.
+
 ## 0.2.0 (2026-10-26)
 
 - `split(..., summary=...)` reuses a stored summary and skips the LLM call, for re-chunking
