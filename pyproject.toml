@@ -1,0 +1,26 @@
+[project]
+name = "chunkguard"
+version = "0.1.0"
+description = "PIC document chunking (Pseudo-Instruction for document Chunking) for RAG indexing"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=3.37",
+    "pydantic-settings>=2.16",
+]
+
+[dependency-groups]
+dev = ["pytest", "ruff", "black"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.black]
+line-length = 100
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
