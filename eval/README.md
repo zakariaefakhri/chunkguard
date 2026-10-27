@@ -71,3 +71,28 @@ How to read this:
   relevant, and 68% of the chunks retrieved in the top 5 are relevant ones.
 - An earlier run on 11 documents with Gemini 3.5 Flash as summarizer showed the same
   pattern.
+
+## Stage 1: what improves PIC?
+
+[experiments.py](experiments.py) tests five changes that need no extra LLM calls, tuning each
+on 300 questions and checking the chosen settings on 300 different ones with McNemar's exact
+test. Full tables in [experiments.md](experiments.md).
+
+- **Smoothing** the similarity curve over 3 or 5 sentences: worse.
+- **Median instead of mean** as threshold: one point better on the tuning questions, noise.
+- **First summary sentence prepended before embedding:** clearly worse, for PIC and for
+  fixed-size alike. Every chunk of a document gets the same prefix, so their vectors move
+  closer together.
+- **Score bonus for chunks flagged relevant:** no measurable effect.
+- **Shorter chunks** (cap 60 words, merge below 25): the only change that helps. On the test
+  questions it beats 100-word fixed-size chunks at a 200-word budget (88.7 against 84.3,
+  p = 0.04).
+
+That last gain is a chunk-size effect, not a PIC effect: **fixed-size chunks of 60 words
+score the same** (89.0, p = 1.0, the two methods disagree on only 11 of 300 questions), and so
+do single sentences (89.0). On this benchmark, no tested variant of PIC beats fixed-size
+chunking of the same size. Nothing from stage 1 went into the library as a PIC option.
+
+What the measurement does support, for any chunker: keep chunks short when the retrieved
+text is limited, around 60 words here rather than 100.
+

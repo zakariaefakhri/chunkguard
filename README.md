@@ -230,11 +230,18 @@ LiteLLM versions 1.82.7 and 1.82.8 were compromised on PyPI in March 2026; the e
 
 [eval/](eval/) measures retrieval on Wikipedia articles from the SQuAD dev set, PIC against
 sentence, paragraph and fixed-size chunking, with the paper's embedding model
-(bge-large-en-v1.5). Result on 37 documents and 300 questions: PIC in the paper's setting
-does not beat fixed-size chunking. PIC with `max_length=100` words and `min_length=50` ties
-it at Hits@5 and is ahead when the retrieved text is limited to 200 words (83.0% against
-78.3%), a gap just above the noise of the sample. Full table and caveats in
-[eval/README.md](eval/README.md). Measure PIC on your own corpus before relying on a gain.
+(bge-large-en-v1.5), 37 documents, tuning and test questions kept apart, McNemar's test.
+
+On this benchmark PIC does not beat fixed-size chunking of the same size. PIC in the paper's
+setting trails 100-word fixed-size chunks; PIC capped at 60 words beats them, but 60-word
+fixed-size chunks do just as well, so the gain comes from the shorter chunks, not from PIC.
+Smoothing, other thresholds, summary context in the vector and a bonus for relevant chunks
+did not help. SQuAD asks mostly single-sentence factual questions, which is where grouping
+related sentences should matter least; datasets with answers spread over several sentences
+are still untested. Details in [eval/README.md](eval/README.md).
+
+Measure on your own corpus. If you use chunkguard, prefer short chunks
+(`max_length=60, min_length=25, length=lambda t: len(t.split())` scored best here).
 
 ## Development
 
