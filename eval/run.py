@@ -144,6 +144,12 @@ def main() -> None:
     parser.add_argument(
         "--only-cached", action="store_true", help="use only documents with a cached summary"
     )
+    parser.add_argument(
+        "--summary-max-chars",
+        type=int,
+        default=100_000,
+        help="longer documents reach the LLM as excerpts (for small per-request token limits)",
+    )
     args = parser.parse_args()
 
     settings, llm, embedder, _ = _parts(args.env)
@@ -191,7 +197,7 @@ def main() -> None:
     }
     started = time.time()
     for name, options in variants.items():
-        chunker = PICChunker(complete, embed, **options)
+        chunker = PICChunker(complete, embed, summary_max_chars=args.summary_max_chars, **options)
         pic_chunks, pic_flags = [], []
         for article, text in zip(articles, documents, strict=True):
             title = article["title"]
@@ -222,7 +228,8 @@ def main() -> None:
     pic = results["PIC (paper: no length limits)"]
     notes = (
         f"\n\n{args.questions} questions (seed {args.seed}), {len(articles)} documents, "
-        f"LLM `{settings.llm_model}`, embeddings `{embedding_model}`. "
+        f"LLM `{settings.llm_model}`, embeddings `{embedding_model}`, "
+        f"summary input capped at {args.summary_max_chars:,} characters. "
         f"PIC marked {pic['relevant_share']}% of its chunks relevant; "
         f"{pic['relevant_among_top5']}% of the chunks retrieved in the top 5 were relevant ones.\n"
     )

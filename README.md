@@ -228,13 +228,13 @@ LiteLLM versions 1.82.7 and 1.82.8 were compromised on PyPI in March 2026; the e
 
 ## Does it help?
 
-[eval/](eval/) measures retrieval on the 48 Wikipedia articles of the SQuAD dev set, PIC
-against sentence, paragraph and fixed-size chunking, with the paper's embedding model
-(bge-large-en-v1.5) and Gemini Flash as summarizer. Preliminary result on 11 documents and
-300 questions: PIC in the paper's setting does not beat fixed-size chunking; PIC with
-`max_length=100` words and `min_length=50` is on par with or slightly ahead of it, within
-the noise of the sample. Full table and caveats in [eval/README.md](eval/README.md). Treat
-PIC as something to measure on your own corpus, not as a guaranteed gain.
+[eval/](eval/) measures retrieval on Wikipedia articles from the SQuAD dev set, PIC against
+sentence, paragraph and fixed-size chunking, with the paper's embedding model
+(bge-large-en-v1.5). Result on 37 documents and 300 questions: PIC in the paper's setting
+does not beat fixed-size chunking. PIC with `max_length=100` words and `min_length=50` ties
+it at Hits@5 and is ahead when the retrieved text is limited to 200 words (83.0% against
+78.3%), a gap just above the noise of the sample. Full table and caveats in
+[eval/README.md](eval/README.md). Measure PIC on your own corpus before relying on a gain.
 
 ## Development
 
