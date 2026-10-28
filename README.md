@@ -55,7 +55,7 @@ chunks = chunker.split(doc_id="report-7", text=cleaned_text, language="en")
 
 Options: `max_length` (default 2000), `min_length` (default 0), `length` (default `len`, see
 [Token-based limits](#token-based-limits)), `summary_max_chars`, `summary_prompt`,
-`sentence_splitter`.
+`abbreviations`, `sentence_splitter`.
 
 **Option 2: `.env` with LiteLLM.** Install the extra, copy [`.env.example`](.env.example) to
 `.env` and set the two models as [LiteLLM strings](https://docs.litellm.ai/docs/providers):
@@ -138,6 +138,15 @@ The default is the paper's prompt (`chunkguard.SUMMARY_PROMPT`) plus an instruct
 in the document's language. Pass `summary_prompt` with `{text}` and `{language}` placeholders
 to change it.
 
+### Your own abbreviations
+
+Domain texts use abbreviations no general list knows ("Flst.", "lfd.", "Bauabschn."). Pass them
+so they never end a sentence (case-insensitive, with or without the period):
+
+```python
+chunker = PICChunker(complete, embed, abbreviations={"Flst", "lfd", "Bauabschn"})
+```
+
 ### Your own sentence splitter
 
 Sentences come from [sentencex](https://github.com/wikimedia/sentencex) (see [Limits](#limits)).
@@ -218,10 +227,12 @@ LiteLLM versions 1.82.7 and 1.82.8 were compromised on PyPI in March 2026; the e
 
 - **Sentence splitting is rule-based.** sentencex carries punctuation and abbreviation rules
   for many languages and falls back to related ones; chunkguard's additions (see "How it
-  works") are tested for German and English only. Known misses: "zzgl. MwSt." at the end of
-  a sentence is merged with the next one, as is the rare English "We sold 3. Then ...", and
-  languages without sentence punctuation (Thai) are not split. Pass your own splitter if
-  that matters.
+  works") are tested for German and English only. On the UD treebanks it matches sentencex
+  in English and trails it slightly in German, mostly on faulty gold sentences
+  ([eval/sentences.md](eval/sentences.md)). Known misses: "zzgl. MwSt." at the end of a
+  sentence is merged with the next one, sentences without final punctuation (headlines) are
+  not separated, and languages without sentence punctuation (Thai) are not split. Pass your
+  own abbreviations or splitter if that matters.
 - **Lengths count sentences, not gaps.** A chunk's length is the sum of its sentences; the
   whitespace between them is not counted, so a chunk can exceed `max_length` by a few
   characters of spacing.

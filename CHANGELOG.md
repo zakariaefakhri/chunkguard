@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Fix: 0.3.0's sentence rules dropped 562 of 13,889 English sentence boundaries on the UD
+  English-EWT treebank (recall 70.6 instead of sentencex's 74.6). The lowercase rule now only
+  repairs what it was meant for, a short abbreviation before a non-ASCII lowercase word
+  ("Abb. über"); the ordinal rule only applies to languages that write ordinals with a
+  period (German, Danish, Hungarian, Czech, Polish, ...), so "the age of 13. Police said"
+  ends a sentence again. English recall is back to sentencex's, German unchanged.
+- `abbreviations=` on `PICChunker` and `split_sentences` adds your own abbreviations.
+- `eval/sentences.py` measures sentence boundaries on UD German-GSD and English-EWT.
+  Abbreviations learned with Punkt did not help there and are not part of the library.
+
 ## 0.3.0 (2026-10-28)
 
 Breaking:

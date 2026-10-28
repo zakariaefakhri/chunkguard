@@ -119,3 +119,31 @@ def test_ordinals_at_sentence_start_are_never_cut_off():
     assert sentences("Er wurde Zweiter. 3. Platz ging an Anna.") == [
         "Er wurde Zweiter. 3. Platz ging an Anna."
     ]
+
+
+def test_lowercase_sentence_starts_are_kept_in_informal_text():
+    assert sentences("Check out my blog. hey that's a great blog.", "en") == [
+        "Check out my blog.",
+        "hey that's a great blog.",
+    ]
+    assert sentences("Er baute einen Turm für die Malatesta. über dem Tor hing ein Wappen.") == [
+        "Er baute einen Turm für die Malatesta.",
+        "über dem Tor hing ein Wappen.",
+    ]
+
+
+def test_english_has_no_period_ordinals():
+    assert sentences("He was under the age of 13. Police said so.", "en") == [
+        "He was under the age of 13.",
+        "Police said so.",
+    ]
+
+
+def test_extra_abbreviations_can_be_passed_in():
+    text = "Das Flst. Nr. 12 liegt in der Gemarkung Bl. Süd. Danach folgt Teil zwei."
+    assert len(split_sentences(text, "de")) > 2
+    spans = split_sentences(text, "de", abbreviations={"Flst", "bl."})
+    assert [text[s:e] for s, e in spans] == [
+        "Das Flst. Nr. 12 liegt in der Gemarkung Bl. Süd.",
+        "Danach folgt Teil zwei.",
+    ]

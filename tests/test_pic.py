@@ -285,3 +285,16 @@ def test_old_limit_names_still_work_with_a_warning():
     with pytest.warns(DeprecationWarning, match="max_length"):
         chunker = PICChunker(lambda p: "s", bag_of_words, max_chars=300, min_chars=10)
     assert (chunker.max_length, chunker.min_length) == (300, 10)
+
+
+def test_abbreviations_option_reaches_the_splitter():
+    text = "Das Flst. Grün liegt hier. Danach folgt Teil zwei."
+    fake = Fake("Flst")
+    plain = PICChunker(fake.complete, fake.embed, min_length=0)
+    assert plain.sentence_splitter(text, "de") != [(0, 26), (27, 50)]
+    chunker = PICChunker(fake.complete, fake.embed, abbreviations={"Flst"})
+    assert chunker.sentence_splitter(text, "de") == [(0, 26), (27, 50)]
+    with pytest.raises(ValueError):
+        PICChunker(
+            fake.complete, fake.embed, abbreviations={"x"}, sentence_splitter=lambda t, lang: []
+        )

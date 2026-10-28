@@ -13,6 +13,7 @@ Every line break ends a sentence, so headings and list items stand alone.
 """
 
 import re
+from collections.abc import Collection
 from functools import lru_cache
 
 import sentencex
@@ -32,27 +33,39 @@ _EXTRA_ABBREVIATIONS = {
 # Street names: Hauptstr., Bahnhofstr.
 _ABBREVIATION_SUFFIXES = {"de": ("str.",)}
 
+# Languages that write ordinals with a period ("am 3. Mai", "2. emelet", "1. kerros").
+_ORDINAL_LANGUAGES = frozenset("de da no nb nn fi et is fo hu cs sk sl hr sr bs pl tr lv".split())
+# A word this short before the period is likely an abbreviation ("Abb.", "inkl.").
+_SHORT_WORD = 5
+
 _TOKEN = re.compile(r"\S+")
 _SHORT_NUMBER = re.compile(r"\d{1,3}\.")
 # Characters looked at around a boundary; slicing the whole text per boundary is quadratic.
 _WINDOW = 80
 
 
-def split_sentences(text: str, language: str) -> list[tuple[int, int]]:
+def split_sentences(
+    text: str, language: str, *, abbreviations: Collection[str] | None = None
+) -> list[tuple[int, int]]:
     """Return the (start, end) character spans of the sentences in ``text``.
 
     ``language`` is a BCP 47 code such as "en" or "pt-BR"; only the primary
     subtag is used. Spans exclude surrounding whitespace, so ``text[start:end]``
     is the sentence, and whitespace-only pieces are dropped.
+
+    ``abbreviations`` adds abbreviations that never end a sentence, for example
+    learned from your documents with ``learn_abbreviations``; case-insensitive,
+    with or without the final period ("Flst", "z.b.").
     """
     primary = language.split("-")[0].lower()
+    learned = frozenset(_normalize(a) for a in abbreviations or ())
     cuts = {i + 1 for i, char in enumerate(text) if char == "\n"}
     boundaries = sorted(b["end_index"] for b in sentencex.get_sentence_boundaries(primary, text))
     for end in boundaries:
         if not (
             _continues_lowercase(text, end)
-            or _ends_with_abbreviation(text, end, primary)
-            or _ends_with_ordinal(text, end, primary, cuts)
+            or _ends_with_abbreviation(text, end, primary, learned)
+            or _ends_with_ordinal(text, end, primary, learned, cuts)
         ):
             cuts.add(end)
 
@@ -69,18 +82,37 @@ def split_sentences(text: str, language: str) -> list[tuple[int, int]]:
 
 
 def _continues_lowercase(text: str, position: int) -> bool:
-    """True if the same line goes on with a lowercase letter, i.e. after an abbreviation.
+    """True if a short word with a period is followed by a non-ASCII lowercase letter.
 
-    sentencex misses this for some abbreviations and for non-ASCII letters such
-    as "ü". Merging two sentences costs less than cutting one in half.
+    sentencex keeps an abbreviation together with a following lowercase word, but
+    only if that word starts with an ASCII letter: "Abb. drei" stays one sentence,
+    "Abb. über" is split. This repairs the second case. Other lowercase starts are
+    real sentences, common in web text and chats ("blog. hey that's").
     """
     rest = text[position : position + _WINDOW].lstrip(" \t")
-    return bool(rest) and rest[0].islower()
-
-
-def _ends_with_abbreviation(text: str, position: int, language: str) -> bool:
+    if not rest or not rest[0].islower() or rest[0].isascii():
+        return False
     tokens = _TOKEN.findall(text, max(0, position - _WINDOW), position)
-    return bool(tokens) and _is_extra_abbreviation(tokens[-1], language)
+    if not tokens or not tokens[-1].endswith("."):
+        return False
+    word = tokens[-1].rstrip(".")
+    return sum(c.isalpha() for c in word) <= _SHORT_WORD or "." in word
+
+
+def _normalize(word: str) -> str:
+    return word.strip("([{\"'„“«»").rstrip(".").lower()
+
+
+def _ends_with_abbreviation(
+    text: str, position: int, language: str, learned: frozenset[str]
+) -> bool:
+    tokens = _TOKEN.findall(text, max(0, position - _WINDOW), position)
+    if not tokens:
+        return False
+    word = tokens[-1]
+    return _is_extra_abbreviation(word, language) or (
+        word.endswith(".") and _normalize(word) in learned
+    )
 
 
 def _is_extra_abbreviation(word: str, language: str) -> bool:
@@ -98,7 +130,9 @@ def _ends_sentence(word: str, language: str) -> bool:
     return len(sentencex.get_sentence_boundaries(language, f"{word} Wort.")) > 1
 
 
-def _ends_with_ordinal(text: str, position: int, language: str, cuts: set[int]) -> bool:
+def _ends_with_ordinal(
+    text: str, position: int, language: str, learned: frozenset[str], cuts: set[int]
+) -> bool:
     """True if the piece ends in an ordinal such as "18.", not in a sentence-final number.
 
     A number of up to three digits plus a period is an ordinal in German,
@@ -109,8 +143,11 @@ def _ends_with_ordinal(text: str, position: int, language: str, cuts: set[int]) 
     word that opens the sentence ("Am 3. Mai", "Der 3. Platz"). After a digit
     group, an abbreviation or a noun inside the sentence it is a house, phone or
     page number, and the sentence ends ("Tel. 069 123.", "Hauptstr. 5.", "Nr. 5.",
-    "Seite 5."). English "We sold 3. Then ..." is merged, a rare case.
+    "Seite 5."). Only for languages that write ordinals this way; English "the
+    age of 13. Police said" ends a sentence.
     """
+    if language not in _ORDINAL_LANGUAGES:
+        return False
     window_start = max(0, position - _WINDOW)
     tokens = list(_TOKEN.finditer(text, window_start, position))
     if not tokens or not _SHORT_NUMBER.fullmatch(tokens[-1].group()):
@@ -122,7 +159,12 @@ def _ends_with_ordinal(text: str, position: int, language: str, cuts: set[int]) 
         return False
     previous = tokens[-2]
     word = previous.group()
-    if word.endswith(".") and word[:-1].isalpha() and _ends_sentence(word, language):
+    if (
+        word.endswith(".")
+        and word[:-1].isalpha()
+        and _normalize(word) not in learned
+        and _ends_sentence(word, language)
+    ):
         return True
     return word.isalpha() and (word.islower() or _opens_sentence(text, previous.start(), cuts))
 

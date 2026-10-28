@@ -15,7 +15,8 @@ from __future__ import annotations
 import math
 import warnings
 from bisect import bisect_left
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
+from functools import partial
 from statistics import fmean
 
 from pydantic import BaseModel
@@ -74,6 +75,7 @@ class _Chunker:
         length: Length = len,
         summary_max_chars: int | None = 100_000,
         summary_prompt: str = SUMMARY_PROMPT,
+        abbreviations: Collection[str] | None = None,
         sentence_splitter: SentenceSplitter = split_sentences,
         max_chars: int | None = None,
         min_chars: int | None = None,
@@ -97,6 +99,10 @@ class _Chunker:
         self.length = length
         self.summary_max_chars = summary_max_chars
         self.summary_prompt = summary_prompt
+        if abbreviations:
+            if sentence_splitter is not split_sentences:
+                raise ValueError("abbreviations only apply to the built-in sentence splitter")
+            sentence_splitter = partial(split_sentences, abbreviations=frozenset(abbreviations))
         self.sentence_splitter = sentence_splitter
 
     def _prompt(self, text: str, language: str, spans: list[Span]) -> str:
