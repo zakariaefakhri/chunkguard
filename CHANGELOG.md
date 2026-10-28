@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-28)
 
 - Fix: 0.3.0's sentence rules dropped 562 of 13,889 English sentence boundaries on the UD
   English-EWT treebank (recall 70.6 instead of sentencex's 74.6). The lowercase rule now only
