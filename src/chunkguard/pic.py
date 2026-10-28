@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from bisect import bisect_left
 from collections.abc import Awaitable, Callable
 from statistics import fmean
 
@@ -98,8 +99,8 @@ class _Chunker:
         self.summary_prompt = summary_prompt
         self.sentence_splitter = sentence_splitter
 
-    def _prompt(self, text: str, language: str) -> str:
-        excerpt = _excerpt(text, self.summary_max_chars)
+    def _prompt(self, text: str, language: str, spans: list[Span]) -> str:
+        excerpt = _excerpt(text, spans, self.summary_max_chars)
         return self.summary_prompt.format(text=excerpt, language=language)
 
     def _chunks(
@@ -171,7 +172,7 @@ class PICChunker(_Chunker):
         if not spans:
             return []
         if summary is None:
-            summary = self.complete(self._prompt(text, language))
+            summary = self.complete(self._prompt(text, language, spans))
         summary = (summary or "").strip()
         vectors = self.embed([summary, *(text[s:e] for s, e in spans)])
         return self._chunks(doc_id, text, language, spans, summary, vectors)
@@ -192,25 +193,38 @@ class AsyncPICChunker(_Chunker):
         if not spans:
             return []
         if summary is None:
-            summary = await self.complete(self._prompt(text, language))
+            summary = await self.complete(self._prompt(text, language, spans))
         summary = (summary or "").strip()
         vectors = await self.embed([summary, *(text[s:e] for s, e in spans)])
         return self._chunks(doc_id, text, language, spans, summary, vectors)
 
 
-def _excerpt(text: str, limit: int | None) -> str:
-    """Shorten text to about limit characters, taking evenly spread pieces.
+def _excerpt(text: str, spans: list[Span], limit: int | None) -> str:
+    """Shorten text to about limit characters: evenly spread runs of whole sentences.
 
     Keeps the summary within the LLM's context window while every part of the
-    document still contributes to it.
+    document still contributes to it. Each piece starts at a sentence and ends
+    after one; only a single sentence longer than a piece is cut, at a space.
     """
     if limit is None or len(text) <= limit:
         return text
     size = limit // _EXCERPT_PIECES
     step = (len(text) - size) / (_EXCERPT_PIECES - 1)
-    return "\n[…]\n".join(
-        text[round(i * step) : round(i * step) + size] for i in range(_EXCERPT_PIECES)
-    )
+    starts = [s for s, _ in spans]
+    pieces, next_free = [], 0
+    for i in range(_EXCERPT_PIECES):
+        first = max(bisect_left(starts, round(i * step)), next_free)
+        if first >= len(spans):
+            break
+        begin, stop, j = spans[first][0], spans[first][0], first
+        while j < len(spans) and spans[j][1] - begin <= size:
+            stop, j = spans[j][1], j + 1
+        if stop == begin:  # one sentence longer than the piece
+            space = text.rfind(" ", begin, begin + size)
+            stop, j = (space if space > begin else begin + size), first + 1
+        pieces.append(text[begin:stop])
+        next_free = j
+    return "\n[…]\n".join(pieces)
 
 
 def _cosine(a: list[float], b: list[float]) -> float:

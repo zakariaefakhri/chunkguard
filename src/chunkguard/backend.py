@@ -1,13 +1,21 @@
-"""Any LLM and embedding provider via LiteLLM, configured from .env.
+"""Any LLM and embedding provider via LiteLLM, configured from environment variables.
 
 Needs the extra: pip install "chunkguard[litellm]". Models are LiteLLM strings
 such as "openai/gpt-4.1-mini", "anthropic/claude-sonnet-5-5", "gemini/gemini-2.5-flash",
 "azure/<deployment>", "bedrock/...", "ollama/llama3.1" or "mistral/mistral-embed".
+
+Settings come from the process environment; a .env file is read only when its path is
+passed. LiteLLM itself loads a .env on import unless LITELLM_MODE is set to something
+other than DEV, so this module sets LITELLM_MODE=PRODUCTION if it is unset.
 """
 
 from __future__ import annotations
 
+import asyncio
+import os
 from typing import Any, Literal
+
+os.environ.setdefault("LITELLM_MODE", "PRODUCTION")
 
 try:
     import litellm
@@ -31,6 +39,8 @@ from chunkguard.tokens import token_length
 
 # Most providers accept far more, but Cohere caps a request at 96 inputs.
 DEFAULT_EMBED_BATCH_SIZE = 64
+# Embedding requests in flight at once (async only); free tiers reject bursts.
+DEFAULT_EMBED_CONCURRENCY = 4
 # Keeps a request well below the common 300k-token limit, even for dense scripts.
 EMBED_BATCH_CHARS = 400_000
 # Only the embedding input is cut; the chunk text always keeps the whole sentence.
@@ -39,7 +49,7 @@ EMBED_INPUT_MAX_CHARS = 8_000
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="CHUNKGUARD_", env_file=".env", env_ignore_empty=True, extra="ignore"
+        env_prefix="CHUNKGUARD_", env_file=None, env_ignore_empty=True, extra="ignore"
     )
 
     # Unset keys fall back to the provider's own variables (OPENAI_API_KEY, AWS_*, ...).
@@ -53,6 +63,7 @@ class Settings(BaseSettings):
     embedding_api_base: str | None = None
     embedding_api_version: str | None = None
     embedding_batch_size: int = DEFAULT_EMBED_BATCH_SIZE
+    embedding_concurrency: int = Field(DEFAULT_EMBED_CONCURRENCY, ge=1)  # async only
 
     # Per request. LiteLLM's own defaults are 600 s and no retries.
     request_timeout: float = 120
@@ -132,26 +143,37 @@ def async_litellm_complete(model: str, **connection: Any) -> AsyncComplete:
 
 
 def async_litellm_embed(
-    model: str, batch_size: int = DEFAULT_EMBED_BATCH_SIZE, **connection: Any
+    model: str,
+    batch_size: int = DEFAULT_EMBED_BATCH_SIZE,
+    concurrency: int = DEFAULT_EMBED_CONCURRENCY,
+    **connection: Any,
 ) -> AsyncEmbed:
+    """Send the batches in parallel, at most `concurrency` at a time, keeping their order."""
+    if concurrency < 1:
+        raise ValueError("concurrency must be at least 1")
+
     async def embed(texts: list[str]) -> list[list[float]]:
-        vectors: list[list[float]] = []
-        for batch in _batches(texts, batch_size):
-            response = await litellm.aembedding(model=model, input=batch, **connection)
-            vectors.extend(_vectors(response))
-        return vectors
+        slots = asyncio.Semaphore(concurrency)
+
+        async def one(batch: list[str]) -> list[list[float]]:
+            async with slots:
+                return _vectors(await litellm.aembedding(model=model, input=batch, **connection))
+
+        results = await asyncio.gather(*(one(b) for b in _batches(texts, batch_size)))
+        return [vector for batch in results for vector in batch]
 
     return embed
 
 
-def _parts(env_file: str) -> tuple[Settings, dict, dict, dict]:
+def _parts(env_file: str | None) -> tuple[Settings, dict, dict, dict]:
+    if env_file is not None and not os.path.isfile(env_file):
+        raise FileNotFoundError(f"env file not found: {env_file}")
     try:
         s = Settings(_env_file=env_file)
     except ValidationError as error:
-        missing = ", ".join(f"CHUNKGUARD_{e['loc'][0].upper()}" for e in error.errors())
-        raise ValueError(
-            f"missing settings: {missing}; set them in {env_file} or the environment"
-        ) from error
+        names = ", ".join(f"CHUNKGUARD_{str(e['loc'][0]).upper()}" for e in error.errors())
+        where = f"{env_file} or the environment" if env_file else "the environment"
+        raise ValueError(f"invalid or missing settings: {names}; set them in {where}") from error
     llm = _connection(s.llm_api_key, s.llm_api_base, s.llm_api_version, s)
     embedder = _connection(s.embedding_api_key, s.embedding_api_base, s.embedding_api_version, s)
     length: Length = len if s.length_unit == "chars" else token_length(s.token_encoding)
@@ -164,7 +186,8 @@ def _parts(env_file: str) -> tuple[Settings, dict, dict, dict]:
     return s, llm, embedder, options
 
 
-def chunker_from_env(env_file: str = ".env") -> PICChunker:
+def chunker_from_env(env_file: str | None = None) -> PICChunker:
+    """Build a PICChunker from CHUNKGUARD_* variables, plus env_file if given."""
     s, llm, embedder, options = _parts(env_file)
     return PICChunker(
         litellm_complete(s.llm_model, **llm),
@@ -173,10 +196,13 @@ def chunker_from_env(env_file: str = ".env") -> PICChunker:
     )
 
 
-def async_chunker_from_env(env_file: str = ".env") -> AsyncPICChunker:
+def async_chunker_from_env(env_file: str | None = None) -> AsyncPICChunker:
+    """Build an AsyncPICChunker from CHUNKGUARD_* variables, plus env_file if given."""
     s, llm, embedder, options = _parts(env_file)
     return AsyncPICChunker(
         async_litellm_complete(s.llm_model, **llm),
-        async_litellm_embed(s.embedding_model, s.embedding_batch_size, **embedder),
+        async_litellm_embed(
+            s.embedding_model, s.embedding_batch_size, s.embedding_concurrency, **embedder
+        ),
         **options,
     )

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.0 (2026-10-28)
+
+Breaking:
+
+- `chunker_from_env()` and `async_chunker_from_env()` no longer read `.env` from the working
+  directory. Pass the path (`chunker_from_env(".env")`) or set the `CHUNKGUARD_*` variables in
+  the environment. A path that does not exist raises `FileNotFoundError`. Importing the
+  LiteLLM backend also sets `LITELLM_MODE=PRODUCTION` if unset, which stops LiteLLM from
+  loading a `.env` of its own on import.
+
+Fixes and improvements (from a code review):
+
+- Sentence splitting: "Fa. Rewe" is no longer split; "Tel. 069 123." and "Hauptstr. 5." end
+  their sentence again (the earlier ordinal rule merged them with the next one). Ordinals count
+  as such only after a lowercase word, at a sentence start or after a sentence end
+  ("im 18. Jahrhundert", "Der 3. Platz"); German and English abbreviations sentencex misses
+  are handled until it covers them.
+- Excerpts for long documents consist of whole sentences.
+- The async embedder sends its batches in parallel, at most `EMBEDDING_CONCURRENCY` (default 4)
+  at a time.
+
 ## 0.2.1 (2026-10-26)
 
 - The `litellm` extra now installs `tenacity`, which LiteLLM needs for `num_retries` but does

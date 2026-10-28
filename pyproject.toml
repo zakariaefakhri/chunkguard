@@ -1,6 +1,6 @@
 [project]
 name = "chunkguard"
-version = "0.2.1"
+version = "0.3.0"
 description = "PIC document chunking for RAG with any LLM and embedding model"
 readme = "README.md"
 license = "MIT"

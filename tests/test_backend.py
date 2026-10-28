@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -247,3 +248,50 @@ def test_token_length_counts_tokens():
 
     count = token_length("o200k_base")
     assert 0 < count("Hallig Hooge liegt im Wattenmeer.") < 12
+
+
+def test_async_batches_run_in_parallel_up_to_the_limit_and_keep_order(monkeypatch):
+    state = {"in_flight": 0, "peak": 0}
+
+    async def aembedding(model, input, **kwargs):  # noqa: A002 - LiteLLM's parameter name
+        state["in_flight"] += 1
+        state["peak"] = max(state["peak"], state["in_flight"])
+        await asyncio.sleep(0.01)
+        state["in_flight"] -= 1
+        items = [{"index": i, "embedding": [float(t)]} for i, t in enumerate(input)]
+        return SimpleNamespace(data=items)
+
+    monkeypatch.setattr(backend, "litellm", SimpleNamespace(aembedding=aembedding))
+    embed = backend.async_litellm_embed("m", batch_size=2, concurrency=3)
+    texts = [str(i) for i in range(20)]  # 10 batches
+    assert asyncio.run(embed(texts)) == [[float(i)] for i in range(20)]
+    assert state["peak"] == 3
+    with pytest.raises(ValueError):
+        backend.async_litellm_embed("m", concurrency=0)
+
+
+def test_env_file_in_working_directory_is_not_read_implicitly(env_file, tmp_path, monkeypatch):
+    env_file("CHUNKGUARD_LLM_MODEL=m\nCHUNKGUARD_EMBEDDING_MODEL=e\n")  # tmp_path/.env
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="set them in the environment"):
+        chunker_from_env()
+    assert chunker_from_env(".env").max_length == 2000  # explicit path works
+    monkeypatch.setenv("CHUNKGUARD_LLM_MODEL", "m")
+    monkeypatch.setenv("CHUNKGUARD_EMBEDDING_MODEL", "e")
+    assert chunker_from_env().max_length == 2000  # environment alone works
+    with pytest.raises(FileNotFoundError):
+        chunker_from_env("missing.env")
+
+
+@pytest.mark.parametrize("mode, loaded", [(None, False), ("DEV", True)])
+def test_litellm_does_not_load_dotenv_on_import(tmp_path, mode, loaded):
+    (tmp_path / ".env").write_text("CHUNKGUARD_PROBE_KEY=from-dotenv\n")
+    env = {k: v for k, v in os.environ.items() if k not in ("LITELLM_MODE", "CHUNKGUARD_PROBE_KEY")}
+    if mode:
+        env["LITELLM_MODE"] = mode  # the old behaviour, as a counter-check
+    script = "import os, chunkguard.backend; print(os.environ.get('CHUNKGUARD_PROBE_KEY'))"
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert (result.stdout.strip() == "from-dotenv") is loaded

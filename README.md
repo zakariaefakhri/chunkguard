@@ -22,7 +22,7 @@ one embedding pass over its sentences. No training.
 
 ```bash
 pip install chunkguard              # core: bring your own model functions (Pydantic + sentencex)
-pip install "chunkguard[litellm]"   # plus .env configuration for 100+ providers via LiteLLM
+pip install "chunkguard[litellm]"   # plus configuration by environment for 100+ providers via LiteLLM
 ```
 
 ## Choose your models
@@ -68,12 +68,13 @@ CHUNKGUARD_EMBEDDING_MODEL=cohere/embed-multilingual-v3.0
 Put keys in `.env` as `CHUNKGUARD_LLM_API_KEY` / `CHUNKGUARD_EMBEDDING_API_KEY`. If those are
 unset, LiteLLM uses the provider's usual variables (`ANTHROPIC_API_KEY`, `COHERE_API_KEY`,
 `AWS_*`, ...) from the process environment. Azure, Bedrock, Vertex, Ollama, vLLM and any
-OpenAI-compatible server work the same way. Then:
+OpenAI-compatible server work the same way. The `.env` file is read only when you pass its
+path; without one, the `CHUNKGUARD_*` variables come from the process environment. Then:
 
 ```python
 from chunkguard import chunker_from_env
 
-chunker = chunker_from_env()
+chunker = chunker_from_env(".env")
 chunks = chunker.split(doc_id="report-7", text=cleaned_text, language="en")
 
 for chunk in chunks:
@@ -101,7 +102,7 @@ joined). Each `Chunk` carries:
 ```python
 from chunkguard import async_chunker_from_env
 
-chunker = async_chunker_from_env()
+chunker = async_chunker_from_env(".env")
 chunks = await chunker.split("report-7", cleaned_text, "en")
 ```
 
@@ -160,7 +161,10 @@ chunker = PICChunker(complete, embed, sentence_splitter=nltk_sentences)
 ## How it works
 
 1. **Sentences.** Split into sentences with sentencex, keeping character offsets. Every line
-   break also ends a sentence, so headings and list items stand alone.
+   break also ends a sentence, so headings and list items stand alone. chunkguard drops
+   sentencex boundaries before a lowercase letter, after abbreviations it misses ("Fa.",
+   "Tel.", "inkl.", "Hauptstr."; German and English, measured) and after ordinals ("im 18.
+   Jahrhundert"), but keeps them after house, phone and page numbers ("Hauptstr. 5.").
 2. **Summary.** One LLM call with the summarizer prompt from the paper (Appendix C), plus an
    instruction to answer in the document's language.
 3. **Similarity.** Embed the summary and every sentence; cosine similarity of each sentence
@@ -176,7 +180,7 @@ Steps 1 to 5 are the method as published. chunkguard adds three things for produ
    `min_length` (off by default), unless that would exceed `max_length`. A merged chunk is
    `relevant` when its relevant sentences make up at least half of its text. Note that with
    merging, a short document can end up as a single chunk.
-8. **Long documents** reach the summarizer as eight evenly spread excerpts totalling
+8. **Long documents** reach the summarizer as eight evenly spread runs of whole sentences totalling
    `summary_max_chars`, so the call fits the context window and every part of the document
    still shapes the summary.
 
@@ -184,7 +188,8 @@ Steps 1 to 5 are the method as published. chunkguard adds three things for produ
 
 With plain functions, pass the options to `PICChunker` (`max_length`, `min_length`, `length`,
 `summary_max_chars`, `summary_prompt`, `sentence_splitter`). With the LiteLLM extra, they come
-from environment variables or `.env`, prefixed `CHUNKGUARD_`:
+from environment variables, prefixed `CHUNKGUARD_`, plus the `.env` file whose path you pass
+to `chunker_from_env`:
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -194,6 +199,7 @@ from environment variables or `.env`, prefixed `CHUNKGUARD_`:
 | `LLM_API_VERSION` | – | Azure only |
 | `EMBEDDING_MODEL`, `EMBEDDING_API_*` | | Same settings for the embedding model |
 | `EMBEDDING_BATCH_SIZE` | `64` | Texts per embedding request |
+| `EMBEDDING_CONCURRENCY` | `4` | Embedding requests in flight at once (async only) |
 | `REQUEST_TIMEOUT` | `120` | Seconds per request |
 | `MAX_RETRIES` | `2` | Retries per request on provider errors |
 | `MAX_CHUNK_LENGTH` | `2000` | Split longer chunks; `0` = no limit |
@@ -211,11 +217,11 @@ LiteLLM versions 1.82.7 and 1.82.8 were compromised on PyPI in March 2026; the e
 ## Limits
 
 - **Sentence splitting is rule-based.** sentencex carries punctuation and abbreviation rules
-  for many languages and falls back to related ones. chunkguard adds two language-neutral
-  rules: no cut before a lowercase letter, and no cut after a number of up to three digits
-  ("im 18. Jahrhundert"), which merges the rare English "We sold 3. Then ..." into one
-  sentence. Some boundaries are still missed (a sentence ending in "etc."), and languages
-  without sentence punctuation (Thai) are not split. Pass your own splitter if that matters.
+  for many languages and falls back to related ones; chunkguard's additions (see "How it
+  works") are tested for German and English only. Known misses: "zzgl. MwSt." at the end of
+  a sentence is merged with the next one, as is the rare English "We sold 3. Then ...", and
+  languages without sentence punctuation (Thai) are not split. Pass your own splitter if
+  that matters.
 - **Lengths count sentences, not gaps.** A chunk's length is the sum of its sentences; the
   whitespace between them is not counted, so a chunk can exceed `max_length` by a few
   characters of spacing.

@@ -76,3 +76,46 @@ def test_spans_cover_all_non_whitespace():
 def test_empty_text():
     assert split_sentences("   \n ", "de") == []
     assert split_sentences("", "de") == []
+
+
+def test_abbreviations_sentencex_misses_do_not_end_sentences():
+    assert sentences("Wir liefern an die Fa. Rewe in Köln. Danach ist Schluss.") == [
+        "Wir liefern an die Fa. Rewe in Köln.",
+        "Danach ist Schluss.",
+    ]
+    assert sentences("Preis inkl. Frühstück. Danach Abreise.") == [
+        "Preis inkl. Frühstück.",
+        "Danach Abreise.",
+    ]
+    # Month abbreviations often end a sentence, so they stay boundaries.
+    assert sentences("Treffen am 5. Okt. Bitte pünktlich.") == [
+        "Treffen am 5. Okt.",
+        "Bitte pünktlich.",
+    ]
+
+
+def test_house_phone_and_page_numbers_end_sentences():
+    assert sentences("Rufen Sie an unter Tel. 069 123. Wir sind montags erreichbar.") == [
+        "Rufen Sie an unter Tel. 069 123.",
+        "Wir sind montags erreichbar.",
+    ]
+    assert sentences("Das Büro liegt in der Hauptstr. 5. Parkplätze gibt es keine.") == [
+        "Das Büro liegt in der Hauptstr. 5.",
+        "Parkplätze gibt es keine.",
+    ]
+    assert sentences("Es ist Zimmer Nr. 5. Danach links.") == [
+        "Es ist Zimmer Nr. 5.",
+        "Danach links.",
+    ]
+    assert sentences("Siehe Seite 5. Dort steht es.") == ["Siehe Seite 5.", "Dort steht es."]
+
+
+def test_ordinals_at_sentence_start_are_never_cut_off():
+    assert sentences("Der 3. Platz ging an Anna. Sie freute sich.") == [
+        "Der 3. Platz ging an Anna.",
+        "Sie freute sich.",
+    ]
+    # sentencex does not end the first sentence here; merging beats cutting after "3.".
+    assert sentences("Er wurde Zweiter. 3. Platz ging an Anna.") == [
+        "Er wurde Zweiter. 3. Platz ging an Anna."
+    ]

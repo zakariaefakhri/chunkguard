@@ -139,17 +139,30 @@ def test_custom_sentence_splitter():
     assert [c.text for c in chunks] == ["Resort A", "Hund B", "Resort C"]
 
 
-def test_long_document_summary_sees_evenly_spread_excerpt():
+def test_long_document_summary_sees_evenly_spread_whole_sentences():
     text = "".join(f"Satz {i:05d} ist da. " for i in range(10_000))
     seen = []
     chunker = PICChunker(
         lambda prompt: seen.append(prompt) or "Satz", bag_of_words, summary_max_chars=8_000
     )
     chunker.split("d1", text, "de")
-    excerpt = seen[0]
-    assert len(excerpt) <= 8_000 + 7 * len("\n[…]\n") + len(SUMMARY_PROMPT)
-    assert "Satz 00000" in excerpt and "Satz 09999" in excerpt and "Satz 05" in excerpt
-    assert _excerpt("kurz", 8_000) == "kurz"
+    excerpt = seen[0][seen[0].index("Satz") : seen[0].rindex("ist da.") + len("ist da.")]
+    pieces = excerpt.split("\n[…]\n")
+    assert len(pieces) == 8
+    assert len(excerpt) <= 8_000 + 7 * len("\n[…]\n")
+    for piece in pieces:  # whole sentences only
+        assert piece.startswith("Satz ") and piece.endswith("ist da.")
+    assert "Satz 00000" in pieces[0] and "Satz 09999" in pieces[-1]
+    assert any("Satz 05" in piece for piece in pieces[3:5])
+
+
+def test_excerpt_cuts_a_single_overlong_sentence_at_a_space():
+    text = "Kurz. " + "wort " * 5_000 + "Ende."
+    spans = [(0, 5), (6, len(text))]
+    excerpt = _excerpt(text, spans, 800)
+    assert len(excerpt) <= 800 + 7 * len("\n[…]\n")
+    assert all(not piece.endswith("wor") for piece in excerpt.split("\n[…]\n"))
+    assert _excerpt("kurz", [(0, 4)], 8_000) == "kurz"
 
 
 @pytest.mark.parametrize("answer", ["  ", None])
